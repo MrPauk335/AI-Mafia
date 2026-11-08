@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Mafia</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">🎭 AI Mafia</div>
+  <div id="phase" class="phase">Ожидание начала</div>
+  <div class="controls">
+    <button id="btnStart" class="btn primary">▶ Начать игру</button>
+    <button id="btnPause" class="btn" disabled>⏸ Пауза</button>
+    <button id="btnStop" class="btn" disabled>⏹ Стоп</button>
+    <button id="btnSettings" class="btn">⚙ Настройки</button>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="stage" id="stage">
+    <div class="table-wrap" id="tableWrap">
+      <div class="table"><div class="table-center" id="tableCenter">Мафия</div></div>
+      <div id="seats"></div>
+    </div>
+    <div class="subtitle" id="subtitle"></div>
+  </section>
+
+  <aside class="chat">
+    <div class="chat-head">Чат стола</div>
+    <div class="chat-log" id="chatLog"></div>
+  </aside>
+</main>
+
+<div class="modal" id="settingsModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2>Настройки</h2>
+      <button class="btn" id="btnCloseSettings">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <h3>API (OpenAI-совместимый)</h3>
+      <div class="grid2">
+        <label>Base URL
+          <input id="sBase" placeholder="https://api.openai.com/v1" list="baseList">
+          <datalist id="baseList">
+            <option value="https://api.openai.com/v1">
+            <option value="https://openrouter.ai/api/v1">
+            <option value="https://api.groq.com/openai/v1">
+            <option value="https://api.deepseek.com/v1">
+          </datalist>
+        </label>
+        <label>API ключ
+          <input id="sKey" type="password" placeholder="sk-...">
+        </label>
+        <label>Модель по умолчанию
+          <input id="sModel" placeholder="gpt-4o-mini" list="modelList">
+          <datalist id="modelList">
+            <option value="gpt-4o-mini">
+            <option value="gpt-4o">
+            <option value="openai/gpt-4o-mini">
+            <option value="anthropic/claude-3.5-sonnet">
+            <option value="google/gemini-flash-1.5">
+            <option value="deepseek/deepseek-chat">
+            <option value="meta-llama/llama-3.1-70b-instruct">
+          </datalist>
+        </label>
+        <label>Температура
+          <input id="sTemp" type="number" min="0" max="2" step="0.1">
+        </label>
+      </div>
+      <p class="hint">Ключ хранится только в localStorage твоего браузера и уходит только на указанный Base URL. Без ключа включается демо-режим с заготовленными репликами.</p>
+
+      <h3>Озвучка (TTS)</h3>
+      <div class="grid2">
+        <label>Движок
+          <select id="sTts">
+            <option value="openai">OpenAI TTS (качественный)</option>
+            <option value="browser">Браузерный (бесплатный)</option>
+            <option value="off">Выключена</option>
+          </select>
+        </label>
+        <label>TTS модель (OpenAI)
+          <input id="sTtsModel" placeholder="gpt-4o-mini-tts" list="ttsModels">
+          <datalist id="ttsModels"><option value="gpt-4o-mini-tts"><option value="tts-1"><option value="tts-1-hd"></datalist>
+        </label>
+        <label>TTS Base URL / ключ — пусто = как у API
+          <input id="sTtsBase" placeholder="https://api.openai.com/v1">
+        </label>
+        <label>TTS ключ
+          <input id="sTtsKey" type="password" placeholder="если отличается">
+        </label>
+        <label>Скорость речи <span id="rateVal"></span>
+          <input id="sRate" type="range" min="0.7" max="1.6" step="0.05">
+        </label>
+        <label>Язык игры
+          <input id="sLang" placeholder="русский">
+        </label>
+      </div>
+
+      <h3>Игра</h3>
+      <div class="grid2">
+        <label>Кругов обсуждения
+          <input id="sRounds" type="number" min="1" max="4">
+        </label>
+        <label class="check"><input id="sShowRoles" type="checkbox"> Показывать роли (режим зрителя)</label>
+      </div>
+
+      <h3>Игроки</h3>
+      <div id="playersEditor"></div>
+      <div class="row-btns">
+        <button class="btn" id="btnAddPlayer">+ Игрок</button>
+        <button class="btn" id="btnReset">Сбросить к стандартным</button>
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn primary" id="btnSave">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
