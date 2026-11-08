@@ -137,8 +137,8 @@ function ballSvg(brand, color, v = 0, look = 0) {
   // брови: (x1,y1 внешний край) -> (x2,y2 внутренний край)
   const brows = [
     ['M38 98 L88 122', 'M162 98 L112 122'],     // злой
-    ['M40 122 L88 100', 'M160 122 L112 100'],   // встревоженный
-    ['M40 108 L88 112', 'M160 108 L112 112'],   // хмурый
+    ['M38 102 L88 120', 'M162 102 L112 120'],   // злой, чуть мягче
+    ['M40 94 L88 118', 'M160 94 L112 118'],     // очень злой
   ][v % 3];
   return `<svg viewBox="0 0 200 230" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
 <defs>
@@ -155,7 +155,7 @@ function ballSvg(brand, color, v = 0, look = 0) {
 <circle cx="${64 + dx}" cy="131" r="3.4" fill="#fff"/><circle cx="${128 + dx}" cy="131" r="3.4" fill="#fff"/>
 </g>
 <g stroke="#0d0d14" stroke-width="11" stroke-linecap="round" fill="none"><path d="${brows[0]}"/><path d="${brows[1]}"/></g>
-<path class="m-closed" d="M76 188 Q100 174 124 188" stroke="#0d0d14" stroke-width="7" stroke-linecap="round" fill="none"/>
+<path class="m-closed" d="M78 184 Q100 192 122 182" stroke="#0d0d14" stroke-width="7" stroke-linecap="round" fill="none"/>
 <g class="m-open">
 <path d="M72 178 Q100 166 128 178 Q122 210 100 210 Q78 210 72 178Z" fill="#2a0c10" stroke="#0d0d14" stroke-width="4" stroke-linejoin="round"/>
 <path d="M77 178 Q100 168 123 178 L121 187 Q100 180 79 187Z" fill="#fff"/>
