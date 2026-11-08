@@ -2,7 +2,17 @@
 
 /* ================= Настройки ================= */
 const OPENAI_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
-const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/openai';
+// Провайдеры: у каждого свой ключ. kind: 'openai' = OpenAI-совместимый /chat/completions, 'anthropic' = родной Messages API
+const PROVIDERS = {
+  openai:     { name: 'OpenAI (GPT)',      kind: 'openai',    base: 'https://api.openai.com/v1', def: 'gpt-4o-mini', ph: 'sk-...', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-5-mini'] },
+  anthropic:  { name: 'Anthropic (Claude)', kind: 'anthropic', base: 'https://api.anthropic.com/v1', def: 'claude-haiku-5-5', ph: 'sk-ant-...', models: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'] },
+  gemini:     { name: 'Google (Gemini)',    kind: 'openai',    base: 'https://generativelanguage.googleapis.com/v1beta/openai', def: 'gemini-2.5-flash', ph: 'AIza...', models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite'] },
+  deepseek:   { name: 'DeepSeek',           kind: 'openai',    base: 'https://api.deepseek.com/v1', def: 'deepseek-chat', ph: 'sk-...', models: ['deepseek-chat', 'deepseek-reasoner'] },
+  grok:       { name: 'xAI (Grok)',         kind: 'openai',    base: 'https://api.x.ai/v1', def: 'grok-3-mini', ph: 'xai-...', models: ['grok-3-mini', 'grok-3', 'grok-4'] },
+  openrouter: { name: 'OpenRouter (любые модели)', kind: 'openai', base: 'https://openrouter.ai/api/v1', def: 'openai/gpt-4o-mini', ph: 'sk-or-...', models: ['openai/gpt-4o-mini', 'anthropic/claude-3.5-haiku', 'google/gemini-2.5-flash', 'deepseek/deepseek-chat', 'x-ai/grok-3-mini', 'meta-llama/llama-3.3-70b-instruct'] },
+  custom:     { name: 'Свой (OpenAI-совместимый)', kind: 'openai', base: '', def: '', ph: 'ключ', models: [], custom: true },
+};
+const PROV_IDS = Object.keys(PROVIDERS);
 const GEMINI_VOICES = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Leda', 'Orus', 'Aoede', 'Zephyr', 'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba', 'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar', 'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi', 'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat'];
 const COLORS = ['#e0584a', '#e0a04a', '#7bc96f', '#4ab3e0', '#9a6be0', '#e06bb6', '#4ae0c0', '#c0c04a', '#e08a6b', '#6b8ae0'];
 
@@ -14,11 +24,11 @@ const DEFAULT_PLAYERS = [
   { name: 'Дана',  avatar: '👩‍🎤', voiceO: 'coral',   persona: 'импульсивная, шумная' },
   { name: 'Егор',  avatar: '🤓',    voiceO: 'ash',     persona: 'логик, строит версии по фактам' },
   { name: 'Жанна', avatar: '💃',    voiceO: 'sage',    persona: 'хитрая, дружелюбная' },
-].map((p, i) => ({ model: '', voiceB: '', voiceG: GEMINI_VOICES[i % GEMINI_VOICES.length], ...p }));
+].map((p, i) => ({ provider: '', model: '', voiceB: '', voiceG: GEMINI_VOICES[i % GEMINI_VOICES.length], ...p }));
 
 const DEFAULTS = {
-  base: 'https://api.openai.com/v1', key: '', gKey: '', gTtsModel: 'gemini-2.5-flash-preview-tts', model: 'gpt-4o-mini', temp: 0.9,
-  tts: 'openai', ttsModel: 'gpt-4o-mini-tts', ttsBase: '', ttsKey: '', rate: 1,
+  keys: {}, customBase: '', gTtsModel: 'gemini-2.5-flash-preview-tts', temp: 0.9,
+  tts: 'openai', ttsModel: 'gpt-4o-mini-tts', rate: 1,
   lang: 'русский', rounds: 2, showRoles: true, players: DEFAULT_PLAYERS,
 };
 
@@ -26,7 +36,19 @@ let S = loadSettings();
 function loadSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem('aimafia') || 'null');
-    if (raw) return { ...DEFAULTS, ...raw };
+    if (raw) {
+      const st = { ...DEFAULTS, ...raw };
+      st.keys = { ...(raw.keys || {}) };
+      // миграция со старого формата (один общий ключ + отдельный Gemini)
+      if (raw.key && !st.keys.openai) st.keys.openai = raw.key;
+      if (raw.gKey && !st.keys.gemini) st.keys.gemini = raw.gKey;
+      st.players = (raw.players || DEFAULT_PLAYERS).map(p => {
+        p = { provider: '', ...p };
+        if (/^gemini:/i.test(p.model || '')) { p.provider = 'gemini'; p.model = p.model.replace(/^gemini:/i, ''); }
+        return p;
+      });
+      return st;
+    }
   } catch (e) {}
   return structuredClone(DEFAULTS);
 }
@@ -44,7 +66,10 @@ let G = null;            // текущая игра
 let runToken = 0;        // для остановки
 let paused = false;
 
-function isDemo() { return !S.key.trim() && !(S.gKey || '').trim(); }
+function keyOf(prov) { return ((S.keys || {})[prov] || '').trim(); }
+function hasKey(p) { return !!p.provider && !!keyOf(p.provider); }
+function anyKey() { return PROV_IDS.some(k => keyOf(k)); }
+function isDemo() { return !anyKey(); }
 
 async function gate() {              // пауза / стоп
   while (paused) await sleep(150);
@@ -73,7 +98,7 @@ function renderTable() {
     if (/^(https?:|data:)/.test(p.avatar)) { av.style.backgroundImage = `url("${p.avatar}")`; }
     else av.textContent = p.avatar || '🙂';
     const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = p.name;
-    const md = document.createElement('div'); md.className = 'model'; md.textContent = isDemo() ? 'демо' : (p.model || S.model);
+    const md = document.createElement('div'); md.className = 'model'; md.textContent = !p.provider ? '' : (hasKey(p) ? modelLabel(p) : 'демо');
     const rl = document.createElement('div'); rl.className = 'role ' + p.role; rl.textContent = ROLE_NAME[p.role];
     el.append(bubble, av, nm, md, rl);
     seats.appendChild(el);
@@ -103,59 +128,74 @@ function announce(text, cls = 'sys') {
 }
 
 /* ================= LLM ================= */
-function playerModel(p) { return (p.model || S.model || 'gpt-4o-mini').trim(); }
+function modelOf(p) { return (p.model || '').trim() || PROVIDERS[p.provider]?.def || ''; }
+function modelLabel(p) { return modelOf(p) || '?'; }
+function baseOf(prov) { return prov === 'custom' ? (S.customBase || '').trim().replace(/\/+$/, '') : PROVIDERS[prov].base; }
 
-// Куда слать запрос: модели "gemini:..." / "gemini-..." (при заданном Gemini-ключе) идут на Gemini,
-// остальные — на основной Base URL. Если задан только Gemini-ключ, всё идёт на Gemini.
-function resolveTarget(p) {
-  let model = playerModel(p);
-  const gKey = (S.gKey || '').trim(), key = (S.key || '').trim();
-  const wantsG = /^gemini:/i.test(model) || (/^gemini-/i.test(model) && gKey) || (!key && gKey);
-  if (wantsG) {
-    model = model.replace(/^gemini:/i, '');
-    if (!/^gemini-/i.test(model)) model = 'gemini-2.5-flash';
-    return { gemini: true, url: GEMINI_BASE + '/chat/completions', key: gKey || key, model };
+// Собирает запрос под конкретного провайдера. Возвращает {url, headers, body, parse}
+function buildRequest(p, system, user, maxTokens) {
+  const prov = PROVIDERS[p.provider], model = modelOf(p), key = keyOf(p.provider), temp = Number(S.temp);
+  const base = baseOf(p.provider);
+  if (prov.kind === 'anthropic') {
+    return {
+      url: base + '/messages',
+      headers: {
+        'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: { model, max_tokens: maxTokens, temperature: Math.min(1, temp), system, messages: [{ role: 'user', content: user }] },
+      parse: j => (j.content || []).filter(b => b.type === 'text').map(b => b.text).join(''),
+    };
   }
-  return { gemini: false, url: S.base.replace(/\/+$/, '') + '/chat/completions', key, model };
+  const body = { model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
+  if (p.provider === 'openai' && /^(o\d|gpt-5)/i.test(model)) {      // рассуждающие модели OpenAI
+    body.max_completion_tokens = maxTokens + 1500; body.reasoning_effort = 'low';
+  } else {
+    body.temperature = temp;
+    body.max_tokens = maxTokens;
+    if (p.provider === 'gemini') { body.max_tokens += 1024; body.reasoning_effort = 'low'; }   // «мысли» не должны съесть лимит
+    if (p.provider === 'grok' && /mini/i.test(model)) { body.max_tokens += 1024; body.reasoning_effort = 'low'; }
+    if (/reasoner/i.test(model)) body.max_tokens += 2000;
+  }
+  return {
+    url: base + '/chat/completions',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+    body,
+    parse: j => j.choices?.[0]?.message?.content || '',
+  };
 }
 
 async function llm(p, system, user, maxTokens = 220) {
-  if (isDemo()) return null;
-  const t = resolveTarget(p);
-  const url = t.url;
-  const body = {
-    model: t.model, temperature: Number(S.temp), max_tokens: t.gemini ? maxTokens + 1024 : maxTokens,
-    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-  };
-  if (t.gemini) body.reasoning_effort = 'low';   // чтобы «мысли» не съели лимит токенов
+  if (!hasKey(p)) return null;                       // нет ключа у провайдера игрока — он играет в демо-режиме
+  const prov = PROVIDERS[p.provider], label = `${prov.name}, ${modelOf(p)}`;
+  if (!modelOf(p)) { chat('event', `⚠ У ${p.name} не выбрана модель (${prov.name}).`); return null; }
+  if (!baseOf(p.provider)) { chat('event', `⚠ У ${p.name} провайдер «Свой», но не указан Base URL.`); return null; }
+  const rq = buildRequest(p, system, user, maxTokens);
   const MAX = 4;
   for (let attempt = 1; attempt <= MAX; attempt++) {
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 45000);   // не зависаем навечно
+    const timer = setTimeout(() => ctl.abort(), 60000);   // не зависаем навечно
     try {
-      $('subtitle').textContent = `⏳ ${p.name} думает (${t.model})${attempt > 1 ? ', попытка ' + attempt : ''}…`;
-      const r = await fetch(url, {
-        method: 'POST', signal: ctl.signal,
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t.key },
-        body: JSON.stringify(body),
-      });
+      $('subtitle').textContent = `⏳ ${p.name} думает (${modelOf(p)})${attempt > 1 ? ', попытка ' + attempt : ''}…`;
+      const r = await fetch(rq.url, { method: 'POST', signal: ctl.signal, headers: rq.headers, body: JSON.stringify(rq.body) });
       if (!r.ok) {
         const err = new Error(r.status + ' ' + (await r.text()).slice(0, 200));
         err.status = r.status; throw err;
       }
-      const j = await r.json();
-      const out = (j.choices?.[0]?.message?.content || '').trim();
-      if (!out) chat('event', `⚠ ${p.name} (${t.model}) вернул пустой ответ — использую запасной вариант.`);
+      const out = (rq.parse(await r.json()) || '').trim();
+      if (!out) chat('event', `⚠ ${p.name} (${label}) вернул пустой ответ — использую запасной вариант.`);
       return out;
     } catch (e) {
-      const msg = e.name === 'AbortError' ? 'таймаут 45 с, нет ответа' : e.message;
+      const isNet = e.name === 'TypeError';               // сеть / CORS
+      const msg = e.name === 'AbortError' ? 'таймаут 60 с, нет ответа'
+        : isNet ? 'сеть недоступна или провайдер блокирует запросы из браузера (CORS) — попробуй OpenRouter' : e.message;
       console.warn('LLM error', e);
-      const retryable = e.name === 'AbortError' || e.status === 429 || e.status >= 500 || e.status === undefined;
+      const retryable = e.name === 'AbortError' || e.status === 429 || e.status >= 500;
       if (!retryable || attempt === MAX) {
-        chat('event', `⚠ Ошибка API (${p.name}, ${t.model}): ${msg}`); return null;
+        chat('event', `⚠ Ошибка API (${p.name}, ${label}): ${msg}`); return null;
       }
       const wait = e.status === 429 ? attempt * 6000 : 1500;
-      if (e.status === 429) chat('event', `⏳ Лимит запросов (429) у ${t.gemini ? 'Gemini' : 'API'}, жду ${wait / 1000} с…`);
+      if (e.status === 429) chat('event', `⏳ Лимит запросов (429) у ${prov.name}, жду ${wait / 1000} с…`);
       await sleep(wait);
     } finally { clearTimeout(timer); }
   }
@@ -238,8 +278,8 @@ function stopSpeaking() {
 // Подготовка аудио заранее: возвращает blob-URL или null (тогда играем браузерным голосом / тишиной)
 async function ttsPrepare(p, text) {
   try {
-    if (S.tts === 'openai' && (S.ttsKey || S.key).trim()) return await fetchOpenAI(p, text);
-    if (S.tts === 'gemini' && (S.gKey || '').trim()) return await fetchGemini(p, text);
+    if (S.tts === 'openai' && keyOf('openai')) return await fetchOpenAI(p, text);
+    if (S.tts === 'gemini' && keyOf('gemini')) return await fetchGemini(p, text);
   } catch (e) {
     console.warn('TTS error', e);
     chat('event', `⚠ Ошибка озвучки (${S.tts}), перехожу на браузерный голос: ${e.message}`);
@@ -269,8 +309,8 @@ async function speak(p, text, url) {
 }
 
 async function fetchOpenAI(p, text) {
-  const key = (S.ttsKey || S.key).trim();
-  const base = (S.ttsBase || S.base).replace(/\/+$/, '');
+  const key = keyOf('openai');
+  const base = PROVIDERS.openai.base;
   const r = await fetch(base + '/audio/speech', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
@@ -298,7 +338,7 @@ async function fetchGemini(p, text) {
   const model = (S.gTtsModel || 'gemini-2.5-flash-preview-tts').trim();
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': S.gKey.trim() },
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': keyOf('gemini') },
     body: JSON.stringify({
       contents: [{ parts: [{ text: `Скажи как живой человек за игровым столом (${p.persona || 'обычный характер'}): ${text}` }] }],
       generationConfig: {
@@ -334,8 +374,8 @@ function speakBrowser(p, text) {
 }
 
 // Показывает реплику и сразу играет уже загруженное аудио (текст и голос появляются вместе)
-async function say(p, text, url) {
-  chat('', text, p.name, p.color);
+async function say(p, text, url, tag) {
+  chat(tag ? 'night' : '', text, p.name + (tag || ''), p.color);
   $('subtitle').textContent = `${p.name}: ${text}`;
   p.bubble.textContent = text;
   p.el.classList.add('speaking');
@@ -352,7 +392,15 @@ async function prepTurn(p, round) {
 }
 
 /* ================= Ход игры ================= */
+// «Авто»: игроки без выбранного провайдера делят между собой провайдеров, у которых есть ключ
+let autoIdx = 0;
+function resolveProvider(c, i) {
+  if (c.provider && PROVIDERS[c.provider]) return c.provider;
+  const keyed = PROV_IDS.filter(k => keyOf(k));
+  return keyed.length ? keyed[autoIdx++ % keyed.length] : '';
+}
 function setupGame() {
+  autoIdx = 0;
   const list = S.players.slice();
   const n = list.length;
   const mafiaCount = Math.max(1, Math.floor(n / 3));
@@ -363,7 +411,7 @@ function setupGame() {
   const sh = shuffle(roles);
   G = {
     players: list.map((c, i) => ({
-      id: i, name: c.name || 'Игрок ' + (i + 1), avatar: c.avatar, model: c.model, voiceO: c.voiceO, voiceB: c.voiceB, voiceG: c.voiceG,
+      id: i, name: c.name || 'Игрок ' + (i + 1), avatar: c.avatar, provider: resolveProvider(c, i), model: c.model, voiceO: c.voiceO, voiceB: c.voiceB, voiceG: c.voiceG,
       persona: c.persona, color: COLORS[i % COLORS.length], role: sh[i], alive: true, notes: [],
     })),
     log: [], night: 0, token: runToken,
@@ -378,6 +426,32 @@ function winner() {
   return null;
 }
 
+const NIGHT_DEMO = [
+  'Думаю, {t} слишком активно ведёт себя за столом, его надо убирать. Мой выбор: {t}.',
+  'Мне не нравится, как {t} смотрит на остальных — слишком внимательный. Мой выбор: {t}.',
+  '{t} уже много говорил и может нас вычислить. Мой выбор: {t}.',
+];
+// Ночное действие: игрок вслух говорит, кого выбирает и почему. Возвращает {target, text}
+async function nightAct(p, intro, cands) {
+  const sys = systemPrompt(p);
+  const usr = `Что происходит в игре:\n${publicLog()}\n\n${intro}\nВарианты: ${cands.map(c => c.name).join(', ')}.\n` +
+    `Скажи вслух от первого лица 2–3 предложения: кого выбираешь и ПОЧЕМУ (опирайся на то, что реально звучало за столом). Закончи фразой «Мой выбор: Имя».`;
+  p.el.classList.add('thinking');
+  let text = await llm(p, sys, usr, 220);
+  p.el.classList.remove('thinking');
+  let target = null;
+  if (!text) { target = rnd(cands); text = rnd(NIGHT_DEMO).replace(/\{t\}/g, target.name); }
+  if (!target) {
+    const i = text.toLowerCase().lastIndexOf('выбор');
+    target = pickName(i >= 0 ? text.slice(i) : text, cands) || pickName(text, cands) || rnd(cands);
+  }
+  const url = await ttsPrepare(p, text);
+  await gate();
+  await say(p, text, url, ' 🌙');
+  $('subtitle').textContent = '';
+  return { target, text };
+}
+
 async function nightPhase() {
   G.night++;
   setNight(true);
@@ -386,38 +460,54 @@ async function nightPhase() {
   $('subtitle').textContent = '🌙 Идут ночные действия…';
   await sleep(1200);
 
-  // Мафия
+  // ---- Мафия: вслух, по очереди, с причинами ----
   const mafia = aliveOf('mafia');
   const victimsCand = alive().filter(p => p.role !== 'mafia');
-  const votes = {};
+  announce('🔪 Просыпается мафия. Мафия тихо обсуждает, кого убрать этой ночью.');
+  await sleep(900);
+  const said = [], picks = [];
   for (const m of mafia) {
-    m.el.classList.add('thinking');
-    const t = isDemo() ? rnd(victimsCand) : await choose(m, 'Ночь. Выбери, кого убить (не своего сообщника).', victimsCand);
-    m.el.classList.remove('thinking');
-    votes[t.id] = (votes[t.id] || 0) + 1;
+    await gate();
+    const prev = said.length ? `Сообщники уже сказали: ${said.map(x => x.who + ': ' + x.text).join(' | ')}. Можешь согласиться или предложить другого. ` : '';
+    const r = await nightAct(m, `Ночь ${G.night}. Ты в мафии и тихо шепчешься с сообщниками. ${prev}Выбери жертву (не сообщника).`, victimsCand);
+    said.push({ who: m.name, text: r.text }); picks.push(r.target);
+    mafia.forEach(x => x.notes.push(`Ночь ${G.night}, ${m.name} (мафия) сказал: ${r.text}`));
+    await sleep(500);
   }
-  const victimId = Object.keys(votes).sort((a, b) => votes[b] - votes[a])[0];
-  const victim = G.players[victimId];
-  await gate();
+  const cnt = {};
+  picks.forEach(t => { cnt[t.id] = (cnt[t.id] || 0) + 1; });
+  const best = Math.max(...Object.values(cnt));
+  const top = picks.filter(t => cnt[t.id] === best);
+  const victim = top[top.length - 1];                   // при ничьей решает последний говоривший
+  announce('Мафия сделала выбор и засыпает.', 'event');
+  await sleep(700);
 
-  // Доктор
+  // ---- Доктор ----
   let saved = null;
   const doc = aliveOf('doctor')[0];
   if (doc) {
-    doc.el.classList.add('thinking');
-    saved = isDemo() ? rnd(alive()) : await choose(doc, 'Ночь. Кого ты вылечишь этой ночью?', alive());
-    doc.el.classList.remove('thinking');
+    await gate();
+    announce('💊 Просыпается доктор. Он решает, кого вылечить.');
+    await sleep(700);
+    const r = await nightAct(doc, `Ночь ${G.night}. Ты доктор. Реши, кого вылечить этой ночью (можно себя).`, alive());
+    saved = r.target;
+    doc.notes.push(`Ночь ${G.night}: я лечил ${saved.name}.`);
+    announce('Доктор засыпает.', 'event');
+    await sleep(500);
   }
-  await gate();
 
-  // Комиссар
+  // ---- Комиссар ----
   const det = aliveOf('detective')[0];
   if (det) {
-    det.el.classList.add('thinking');
-    const cand = alive().filter(p => p !== det);
-    const t = isDemo() ? rnd(cand) : await choose(det, 'Ночь. Кого ты проверишь на принадлежность к мафии?', cand);
-    det.el.classList.remove('thinking');
-    det.notes.push(`Проверка в ночь ${G.night}: ${t.name} — ${t.role === 'mafia' ? 'МАФИЯ' : 'не мафия'}.`);
+    await gate();
+    announce('🔎 Просыпается комиссар. Он выбирает, кого проверить.');
+    await sleep(700);
+    const r = await nightAct(det, `Ночь ${G.night}. Ты комиссар. Реши, кого проверить на принадлежность к мафии.`, alive().filter(p => p !== det));
+    const isMafia = r.target.role === 'mafia';
+    det.notes.push(`Проверка в ночь ${G.night}: ${r.target.name} — ${isMafia ? 'МАФИЯ' : 'не мафия'}.`);
+    chat('event', `🔎 Результат проверки (слышит только комиссар): ${r.target.name} — ${isMafia ? 'МАФИЯ' : 'не мафия'}.`);
+    announce('Комиссар засыпает.', 'event');
+    await sleep(600);
   }
   await gate();
 
@@ -472,7 +562,7 @@ async function voting() {
     await gate();
     p.el.classList.add('thinking');
     const others = cand.filter(x => x !== p);
-    const t = isDemo() ? rnd(others) : await choose(p, 'Голосование. За кого ты голосуешь, чтобы казнить его?', others);
+    const t = await choose(p, 'Голосование. За кого ты голосуешь, чтобы казнить его?', others);
     p.el.classList.remove('thinking');
     tally[t.id] = (tally[t.id] || 0) + 1;
     announce(`${p.name} голосует против ${t.name}.`, 'event');
@@ -493,7 +583,9 @@ async function runGame() {
   const token = ++runToken;
   setupGame(); renderTable(); $('chatLog').innerHTML = '';
   $('btnStart').disabled = true; $('btnPause').disabled = false; $('btnStop').disabled = false;
-  if (isDemo()) chat('event', 'ℹ API ключ не задан — демо-режим (заготовленные реплики). Добавь ключ в настройках.');
+  const keyless = G.players.filter(p => !hasKey(p));
+  if (keyless.length) chat('event', `ℹ Без ключа (демо-фразы): ${keyless.map(p => p.name).join(', ')}. Добавь ключ провайдера в настройках.`);
+  G.players.forEach(p => { if (p.el) p.el.querySelector('.model').textContent = hasKey(p) ? modelLabel(p) : 'демо'; });
   announce(`Игра началась! Игроков: ${G.players.length}. Мафии: ${G.players.filter(p => p.role === 'mafia').length}.`);
   G.players.forEach(p => {
     if (p.role === 'mafia') p.notes.push('Мафия: ' + G.players.filter(x => x.role === 'mafia').map(x => x.name).join(', '));
@@ -549,7 +641,8 @@ function renderPlayersEditor() {
     row.innerHTML = `
       <input data-k="avatar" value="" title="Эмодзи или URL картинки" style="text-align:center;font-size:22px">
       <input data-k="name" placeholder="Имя">
-      <input data-k="model" placeholder="модель (пусто = по умолчанию)" list="modelList">
+      <select data-k="provider" title="Провайдер (чей ключ используется)"></select>
+      <input data-k="model" placeholder="модель">
       <select data-k="voice"></select>
       <button class="mini" title="Проверить голос">🔊</button>
       <button class="mini" title="Удалить">🗑</button>`;
@@ -559,7 +652,20 @@ function renderPlayersEditor() {
     const sel = row.querySelector('select'); sel.innerHTML = voiceOptionsHTML(p);
     row.querySelector('[data-k=avatar]').oninput = e => p.avatar = e.target.value;
     row.querySelector('[data-k=name]').oninput = e => p.name = e.target.value;
-    row.querySelector('[data-k=model]').oninput = e => p.model = e.target.value;
+    const provSel = row.querySelector('[data-k=provider]'), modelIn = row.querySelector('[data-k=model]');
+    provSel.innerHTML = '<option value="">Авто (по очереди)</option>' +
+      PROV_IDS.map(k => `<option value="${k}" ${k === p.provider ? 'selected' : ''}>${PROVIDERS[k].name}${keyOf(k) ? ' ✓' : ''}</option>`).join('');
+    const dl = document.createElement('datalist'); dl.id = 'dl_model_' + i; row.appendChild(dl);
+    modelIn.setAttribute('list', dl.id);
+    const syncModel = () => {
+      const pv = PROVIDERS[p.provider];
+      dl.innerHTML = (pv ? pv.models : []).map(m => `<option value="${m}">`).join('');
+      modelIn.placeholder = pv ? (pv.def ? 'по умолчанию: ' + pv.def : 'название модели') : 'авто: модель по умолчанию';
+      modelIn.disabled = !pv;
+    };
+    syncModel();
+    provSel.onchange = e => { p.provider = e.target.value; p.model = ''; modelIn.value = ''; syncModel(); };
+    modelIn.oninput = e => p.model = e.target.value;
     sel.onchange = e => { if (S.tts === 'browser') p.voiceB = e.target.value; else if (S.tts === 'gemini') p.voiceG = e.target.value; else p.voiceO = e.target.value; };
     const [test, del] = row.querySelectorAll('button');
     test.onclick = async () => {
@@ -572,19 +678,38 @@ function renderPlayersEditor() {
     box.appendChild(row);
   });
 }
+function renderProvKeys() {
+  const box = $('provKeys'); box.innerHTML = '';
+  PROV_IDS.forEach(k => {
+    const pv = PROVIDERS[k];
+    const l = document.createElement('label'); l.textContent = pv.name;
+    const inp = document.createElement('input');
+    inp.type = 'password'; inp.placeholder = pv.ph; inp.dataset.prov = k; inp.autocomplete = 'off';
+    inp.value = (S.keys || {})[k] || '';
+    l.appendChild(inp);
+    if (pv.custom) {
+      const b = document.createElement('input');
+      b.id = 'sCustomBase'; b.placeholder = 'Base URL, напр. http://localhost:11434/v1'; b.value = S.customBase || '';
+      l.appendChild(b);
+    }
+    box.appendChild(l);
+  });
+}
 function fillSettings() {
-  $('sGKey').value = S.gKey || ''; $('sGTtsModel').value = S.gTtsModel || '';
-  $('sBase').value = S.base; $('sKey').value = S.key; $('sModel').value = S.model; $('sTemp').value = S.temp;
-  $('sTts').value = S.tts; $('sTtsModel').value = S.ttsModel; $('sTtsBase').value = S.ttsBase; $('sTtsKey').value = S.ttsKey;
+  renderProvKeys();
+  $('sGTtsModel').value = S.gTtsModel || ''; $('sTemp').value = S.temp;
+  $('sTts').value = S.tts; $('sTtsModel').value = S.ttsModel;
   $('sRate').value = S.rate; $('rateVal').textContent = S.rate; $('sLang').value = S.lang;
   $('sRounds').value = S.rounds; $('sShowRoles').checked = S.showRoles;
   draft = structuredClone(S.players); renderPlayersEditor();
 }
 function readSettings() {
-  S.gKey = $('sGKey').value; S.gTtsModel = $('sGTtsModel').value.trim() || DEFAULTS.gTtsModel;
-  S.base = $('sBase').value.trim() || DEFAULTS.base; S.key = $('sKey').value; S.model = $('sModel').value.trim() || DEFAULTS.model;
+  S.keys = {};
+  document.querySelectorAll('#provKeys input[data-prov]').forEach(i => { S.keys[i.dataset.prov] = i.value.trim(); });
+  S.customBase = ($('sCustomBase') ? $('sCustomBase').value : S.customBase || '').trim();
+  S.gTtsModel = $('sGTtsModel').value.trim() || DEFAULTS.gTtsModel;
   S.temp = $('sTemp').value || 0.9; S.tts = $('sTts').value; S.ttsModel = $('sTtsModel').value.trim();
-  S.ttsBase = $('sTtsBase').value.trim(); S.ttsKey = $('sTtsKey').value; S.rate = $('sRate').value;
+  S.rate = $('sRate').value;
   S.lang = $('sLang').value.trim() || 'русский'; S.rounds = Math.max(1, Math.min(4, +$('sRounds').value || 2));
   S.showRoles = $('sShowRoles').checked; S.players = structuredClone(draft);
 }
@@ -599,7 +724,7 @@ $('sRate').oninput = e => $('rateVal').textContent = e.target.value;
 $('sTts').onchange = () => { S.tts = $('sTts').value; renderPlayersEditor(); };
 $('btnAddPlayer').onclick = () => {
   if (draft.length >= 10) return alert('Максимум 10 игроков');
-  draft.push({ name: 'Игрок ' + (draft.length + 1), avatar: rnd(['😎', '🦊', '🐱', '🤖', '🧙', '👽']), model: '', voiceO: rnd(OPENAI_VOICES), voiceB: '', voiceG: rnd(GEMINI_VOICES), persona: '' });
+  draft.push({ name: 'Игрок ' + (draft.length + 1), avatar: rnd(['😎', '🦊', '🐱', '🤖', '🧙', '👽']), provider: '', model: '', voiceO: rnd(OPENAI_VOICES), voiceB: '', voiceG: rnd(GEMINI_VOICES), persona: '' });
   renderPlayersEditor();
 };
 $('btnReset').onclick = () => { draft = structuredClone(DEFAULT_PLAYERS); renderPlayersEditor(); };

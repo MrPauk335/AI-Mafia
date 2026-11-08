@@ -41,57 +41,21 @@
     </div>
 
     <div class="modal-body">
-      <h3>API (OpenAI-совместимый)</h3>
-      <div class="grid2">
-        <label>Base URL
-          <input id="sBase" placeholder="https://api.openai.com/v1" list="baseList">
-          <datalist id="baseList">
-            <option value="https://api.openai.com/v1">
-            <option value="https://openrouter.ai/api/v1">
-            <option value="https://api.groq.com/openai/v1">
-            <option value="https://api.deepseek.com/v1">
-            <option value="https://generativelanguage.googleapis.com/v1beta/openai">
-          </datalist>
-        </label>
-        <label>API ключ
-          <input id="sKey" type="password" placeholder="sk-...">
-        </label>
-        <label>Модель по умолчанию
-          <input id="sModel" placeholder="gpt-4o-mini" list="modelList">
-          <datalist id="modelList">
-            <option value="gpt-4o-mini">
-            <option value="gpt-4o">
-            <option value="gemini:gemini-2.5-flash">
-            <option value="gemini:gemini-2.5-pro">
-            <option value="gemini:gemini-2.5-flash-lite">
-            <option value="openai/gpt-4o-mini">
-            <option value="anthropic/claude-3.5-sonnet">
-            <option value="google/gemini-flash-1.5">
-            <option value="deepseek/deepseek-chat">
-            <option value="meta-llama/llama-3.1-70b-instruct">
-          </datalist>
-        </label>
+      <h3>Ключи API — у каждого провайдера свой</h3>
+      <div id="provKeys" class="grid2"></div>
+      <div class="grid2" style="margin-top:10px">
         <label>Температура
           <input id="sTemp" type="number" min="0" max="2" step="0.1">
         </label>
       </div>
-      <div class="grid2" style="margin-top:10px">
-        <label>Gemini API ключ (aistudio.google.com/apikey)
-          <input id="sGKey" type="password" placeholder="AIza...">
-        </label>
-        <label>Gemini TTS модель
-          <input id="sGTtsModel" placeholder="gemini-2.5-flash-preview-tts">
-        </label>
-      </div>
-      <p class="hint">Gemini: в поле модели игрока пиши <b>gemini:gemini-2.5-flash</b> (или просто gemini-2.5-flash) — он пойдёт на Gemini со своим ключом, остальные игроки на основной Base URL. Так можно мешать GPT, Claude, Gemini в одной партии. Если задан только Gemini-ключ, играют все на Gemini.</p>
-      <p class="hint">Ключ хранится только в localStorage твоего браузера и уходит только на указанный Base URL. Без ключа включается демо-режим с заготовленными репликами.</p>
+      <p class="hint">Вставь ключи тех провайдеров, которыми хочешь играть (остальные можно пустыми). Дальше в списке игроков для каждого выбираешь провайдера и модель. Игрок без ключа своего провайдера говорит заготовленными фразами (демо). Ключи хранятся только в localStorage браузера и уходят только своему провайдеру. Если какой-то провайдер блокирует запросы из браузера (CORS), используй OpenRouter — через него доступны все модели.</p>
 
       <h3>Озвучка (TTS)</h3>
       <div class="grid2">
         <label>Движок
           <select id="sTts">
-            <option value="openai">OpenAI TTS (качественный)</option>
-            <option value="gemini">Gemini TTS (30 голосов)</option>
+            <option value="openai">OpenAI TTS (ключ OpenAI)</option>
+            <option value="gemini">Gemini TTS (ключ Gemini, 30 голосов)</option>
             <option value="browser">Браузерный (бесплатный)</option>
             <option value="off">Выключена</option>
           </select>
@@ -100,11 +64,8 @@
           <input id="sTtsModel" placeholder="gpt-4o-mini-tts" list="ttsModels">
           <datalist id="ttsModels"><option value="gpt-4o-mini-tts"><option value="tts-1"><option value="tts-1-hd"></datalist>
         </label>
-        <label>TTS Base URL / ключ — пусто = как у API
-          <input id="sTtsBase" placeholder="https://api.openai.com/v1">
-        </label>
-        <label>TTS ключ
-          <input id="sTtsKey" type="password" placeholder="если отличается">
+        <label>TTS модель (Gemini)
+          <input id="sGTtsModel" placeholder="gemini-2.5-flash-preview-tts">
         </label>
         <label>Скорость речи <span id="rateVal"></span>
           <input id="sRate" type="range" min="0.7" max="1.6" step="0.05">
