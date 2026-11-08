@@ -9,6 +9,7 @@ const PROVIDERS = {
   gemini:     { name: 'Google (Gemini)',    kind: 'openai',    base: 'https://generativelanguage.googleapis.com/v1beta/openai', def: 'gemini-2.5-flash', ph: 'AIza...', models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite'] },
   deepseek:   { name: 'DeepSeek',           kind: 'openai',    base: 'https://api.deepseek.com/v1', def: 'deepseek-chat', ph: 'sk-...', models: ['deepseek-chat'] },
   grok:       { name: 'xAI (Grok)',         kind: 'openai',    base: 'https://api.x.ai/v1', def: 'grok-3-mini', ph: 'xai-...', models: ['grok-3-mini', 'grok-3', 'grok-4'] },
+  deploy:     { name: 'Deploy (deploy.com)', kind: 'openai',    base: 'https://api.deploy.com/api/v1', def: 'deepseek-ai/deepseek-v4.1-flash-1017', ph: 'ключ с portal.deploy.com', models: ['deepseek-ai/deepseek-v4.1-flash-1017', 'zai-org/glm-5.3-flash'] },
   openrouter: { name: 'OpenRouter (любые модели)', kind: 'openai', base: 'https://openrouter.ai/api/v1', def: 'openai/gpt-4o-mini', ph: 'sk-or-...', models: ['openai/gpt-4o-mini', 'anthropic/claude-3.5-haiku', 'google/gemini-2.5-flash', 'deepseek/deepseek-chat', 'x-ai/grok-3-mini', 'meta-llama/llama-3.3-70b-instruct'] },
   custom:     { name: 'Свой (OpenAI-совместимый)', kind: 'openai', base: '', def: '', ph: 'ключ', models: [], custom: true },
 };
@@ -196,6 +197,12 @@ function buildRequest(p, system, user, maxTokens) {
       if (/pro/i.test(model)) { body.max_tokens += 1024; body.reasoning_effort = 'low'; } else body.reasoning_effort = 'none';
     }
     if (p.provider === 'grok' && /mini/i.test(model)) { body.max_tokens += 1024; body.reasoning_effort = 'low'; }
+    // Deploy: обе модели «думающие» (по умолчанию reasoning_effort=high, мысли тарифицируются как выходные токены).
+    // У DeepSeek V4.1 Flash рассуждение можно выключить (none), у GLM минимум — low.
+    if (p.provider === 'deploy') {
+      body.reasoning_effort = /deepseek/i.test(model) ? 'none' : 'low';
+      if (body.reasoning_effort === 'low') body.max_tokens += 800;
+    }
     if (/reasoner/i.test(model)) body.max_tokens += 2000;
   }
   return {
