@@ -55,6 +55,7 @@
         <label>Движок
           <select id="sTts">
             <option value="openai">OpenAI TTS (ключ OpenAI)</option>
+            <option value="eleven">ElevenLabs (самый живой голос)</option>
             <option value="gemini">Gemini TTS (ключ Gemini, 30 голосов)</option>
             <option value="browser">Браузерный (бесплатный)</option>
             <option value="off">Выключена</option>
@@ -66,6 +67,16 @@
         </label>
         <label>TTS модель (Gemini)
           <input id="sGTtsModel" placeholder="gemini-2.5-flash-preview-tts">
+        </label>
+        <label>ElevenLabs API ключ
+          <input id="sElevenKey" type="password" placeholder="sk_..." autocomplete="off">
+        </label>
+        <label>ElevenLabs модель
+          <input id="sElevenModel" placeholder="eleven_flash_v2_5" list="elevenModels">
+          <datalist id="elevenModels"><option value="eleven_flash_v2_5"><option value="eleven_turbo_v2_5"><option value="eleven_multilingual_v2"></datalist>
+        </label>
+        <label>Голоса ElevenLabs
+          <span><button class="btn" id="btnLoadEleven" type="button">Загрузить мои голоса</button> <span id="elevenStatus" class="hint"></span></span>
         </label>
         <label>Скорость речи <span id="rateVal"></span>
           <input id="sRate" type="range" min="0.7" max="1.6" step="0.05">

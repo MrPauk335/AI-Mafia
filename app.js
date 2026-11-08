@@ -14,6 +14,15 @@ const PROVIDERS = {
 };
 const PROV_IDS = Object.keys(PROVIDERS);
 const GEMINI_VOICES = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Leda', 'Orus', 'Aoede', 'Zephyr', 'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba', 'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar', 'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi', 'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat'];
+// Стандартные (premade) голоса ElevenLabs — доступны на любом тарифе; свои можно подгрузить кнопкой в настройках
+const ELEVEN_DEFAULT_VOICES = [
+  { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel' }, { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella' },  { id: 'ErXwVKbdgFdyNkTfFuwq', name: 'Antoni' },
+  { id: 'AZnzlk1XvdvUeBnXmlld', name: 'Domi' },   { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh' },
+  { id: 'MF3mGyEYCl7XYWbV9V6O', name: 'Elli' },   { id: 'VR6AewLTigWG4xSOukaG', name: 'Arnold' },
+  { id: 'yoZ06aMxZJJ28mfd3POQ', name: 'Sam' },
+];
+function elevenVoiceList() { return (S.elevenVoices && S.elevenVoices.length) ? S.elevenVoices : ELEVEN_DEFAULT_VOICES; }
 const COLORS = ['#e0584a', '#e0a04a', '#7bc96f', '#4ab3e0', '#9a6be0', '#e06bb6', '#4ae0c0', '#c0c04a', '#e08a6b', '#6b8ae0'];
 
 const DEFAULT_PLAYERS = [
@@ -28,6 +37,7 @@ const DEFAULT_PLAYERS = [
 
 const DEFAULTS = {
   keys: {}, customBase: '', gTtsModel: 'gemini-2.5-flash-preview-tts', temp: 0.9,
+  elevenKey: '', elevenModel: 'eleven_flash_v2_5', elevenVoices: [],
   tts: 'openai', ttsModel: 'gpt-4o-mini-tts', rate: 1,
   lang: 'русский', rounds: 2, showRoles: true, players: DEFAULT_PLAYERS,
 };
@@ -280,6 +290,7 @@ async function ttsPrepare(p, text) {
   try {
     if (S.tts === 'openai' && keyOf('openai')) return await fetchOpenAI(p, text);
     if (S.tts === 'gemini' && keyOf('gemini')) return await fetchGemini(p, text);
+    if (S.tts === 'eleven' && (S.elevenKey || '').trim()) return await fetchEleven(p, text);
   } catch (e) {
     console.warn('TTS error', e);
     chat('event', `⚠ Ошибка озвучки (${S.tts}), перехожу на браузерный голос: ${e.message}`);
@@ -291,7 +302,7 @@ async function ttsPrepare(p, text) {
 function playUrl(url) {
   return new Promise(resolve => {
     const a = new Audio(url); currentAudio = a;
-    a.playbackRate = S.tts === 'gemini' ? Math.min(2, Math.max(0.5, Number(S.rate) || 1)) : 1;
+    a.playbackRate = (S.tts === 'gemini' || S.tts === 'eleven') ? Math.min(2, Math.max(0.5, Number(S.rate) || 1)) : 1;
     a.onended = a.onerror = () => { URL.revokeObjectURL(url); currentAudio = null; resolve(); };
     a.play().catch(() => resolve());
   });
@@ -299,7 +310,7 @@ function playUrl(url) {
 
 async function speak(p, text, url) {
   if (url) return playUrl(url);
-  if (S.tts === 'openai' || S.tts === 'gemini' || S.tts === 'browser') {
+  if (S.tts === 'openai' || S.tts === 'gemini' || S.tts === 'eleven' || S.tts === 'browser') {
     // нет предзагруженного аудио (демо / ошибка) — пробуем подготовить на месте, иначе браузерный голос
     const u = (S.tts !== 'browser') ? await ttsPrepare(p, text) : null;
     if (u) return playUrl(u);
@@ -322,6 +333,37 @@ async function fetchOpenAI(p, text) {
   });
   if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 160));
   return URL.createObjectURL(await r.blob());
+}
+
+// ElevenLabs TTS: POST /v1/text-to-speech/{voice_id} -> mp3
+async function fetchEleven(p, text) {
+  const list = elevenVoiceList();
+  const voice = p.voiceE || list[p.id % list.length].id;
+  const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}?output_format=mp3_44100_128`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'xi-api-key': S.elevenKey.trim() },
+    body: JSON.stringify({
+      text, model_id: (S.elevenModel || 'eleven_flash_v2_5').trim(),
+      voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.35, use_speaker_boost: true },
+    }),
+  });
+  if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 160));
+  return URL.createObjectURL(await r.blob());
+}
+async function loadElevenVoices() {
+  const key = ($('sElevenKey').value || '').trim();
+  const st = $('elevenStatus');
+  if (!key) { st.textContent = 'Сначала вставь ключ ElevenLabs'; return; }
+  st.textContent = 'Загружаю…';
+  try {
+    const r = await fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': key } });
+    if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 120));
+    const j = await r.json();
+    S.elevenVoices = (j.voices || []).map(v => ({ id: v.voice_id, name: v.name + (v.labels?.accent ? ' · ' + v.labels.accent : '') }));
+    st.textContent = `Загружено голосов: ${S.elevenVoices.length}`;
+    S.tts = 'eleven'; $('sTts').value = 'eleven';
+    renderPlayersEditor();
+  } catch (e) { st.textContent = 'Ошибка: ' + e.message; }
 }
 
 // Gemini TTS: generateContent -> base64 PCM (24 кГц, 16 бит, моно) -> WAV
@@ -629,6 +671,7 @@ function voiceOptionsHTML(p) {
     const v = browserVoices();
     return '<option value="">авто</option>' + v.map(x => `<option value="${x.name}" ${x.name === p.voiceB ? 'selected' : ''}>${x.name} (${x.lang})</option>`).join('');
   }
+  if (S.tts === 'eleven') return elevenVoiceList().map((x, i) => `<option value="${x.id}" ${(p.voiceE ? x.id === p.voiceE : i === (p.id ?? 0) % elevenVoiceList().length) ? 'selected' : ''}>${x.name}</option>`).join('');
   if (S.tts === 'gemini') return GEMINI_VOICES.map(x => `<option ${x === p.voiceG ? 'selected' : ''}>${x}</option>`).join('');
   return OPENAI_VOICES.map(x => `<option ${x === p.voiceO ? 'selected' : ''}>${x}</option>`).join('');
 }
@@ -649,7 +692,7 @@ function renderPlayersEditor() {
     row.querySelector('[data-k=avatar]').value = p.avatar;
     row.querySelector('[data-k=name]').value = p.name;
     row.querySelector('[data-k=model]').value = p.model || '';
-    const sel = row.querySelector('select'); sel.innerHTML = voiceOptionsHTML(p);
+    const sel = row.querySelector('[data-k=voice]'); sel.innerHTML = voiceOptionsHTML(p);
     row.querySelector('[data-k=avatar]').oninput = e => p.avatar = e.target.value;
     row.querySelector('[data-k=name]').oninput = e => p.name = e.target.value;
     const provSel = row.querySelector('[data-k=provider]'), modelIn = row.querySelector('[data-k=model]');
@@ -666,7 +709,7 @@ function renderPlayersEditor() {
     syncModel();
     provSel.onchange = e => { p.provider = e.target.value; p.model = ''; modelIn.value = ''; syncModel(); };
     modelIn.oninput = e => p.model = e.target.value;
-    sel.onchange = e => { if (S.tts === 'browser') p.voiceB = e.target.value; else if (S.tts === 'gemini') p.voiceG = e.target.value; else p.voiceO = e.target.value; };
+    sel.onchange = e => { if (S.tts === 'browser') p.voiceB = e.target.value; else if (S.tts === 'eleven') p.voiceE = e.target.value; else if (S.tts === 'gemini') p.voiceG = e.target.value; else p.voiceO = e.target.value; };
     const [test, del] = row.querySelectorAll('button');
     test.onclick = async () => {
       readSettings();
@@ -698,6 +741,8 @@ function renderProvKeys() {
 function fillSettings() {
   renderProvKeys();
   $('sGTtsModel').value = S.gTtsModel || ''; $('sTemp').value = S.temp;
+  $('sElevenKey').value = S.elevenKey || ''; $('sElevenModel').value = S.elevenModel || 'eleven_flash_v2_5';
+  $('elevenStatus').textContent = S.elevenVoices?.length ? `Загружено голосов: ${S.elevenVoices.length}` : '';
   $('sTts').value = S.tts; $('sTtsModel').value = S.ttsModel;
   $('sRate').value = S.rate; $('rateVal').textContent = S.rate; $('sLang').value = S.lang;
   $('sRounds').value = S.rounds; $('sShowRoles').checked = S.showRoles;
@@ -708,6 +753,7 @@ function readSettings() {
   document.querySelectorAll('#provKeys input[data-prov]').forEach(i => { S.keys[i.dataset.prov] = i.value.trim(); });
   S.customBase = ($('sCustomBase') ? $('sCustomBase').value : S.customBase || '').trim();
   S.gTtsModel = $('sGTtsModel').value.trim() || DEFAULTS.gTtsModel;
+  S.elevenKey = $('sElevenKey').value.trim(); S.elevenModel = $('sElevenModel').value.trim() || DEFAULTS.elevenModel;
   S.temp = $('sTemp').value || 0.9; S.tts = $('sTts').value; S.ttsModel = $('sTtsModel').value.trim();
   S.rate = $('sRate').value;
   S.lang = $('sLang').value.trim() || 'русский'; S.rounds = Math.max(1, Math.min(4, +$('sRounds').value || 2));
@@ -720,6 +766,7 @@ $('btnSave').onclick = () => {
   document.body.classList.toggle('show-roles', !!S.showRoles);
   if (!G || $('btnStart').disabled === false) { G = null; previewTable(); }
 };
+$('btnLoadEleven').onclick = loadElevenVoices;
 $('sRate').oninput = e => $('rateVal').textContent = e.target.value;
 $('sTts').onchange = () => { S.tts = $('sTts').value; renderPlayersEditor(); };
 $('btnAddPlayer').onclick = () => {
