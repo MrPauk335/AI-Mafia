@@ -209,6 +209,7 @@ const DEMO_LINES = [
   'Помните, как {t} вчера молчал? Для меня это красный флаг.', 'У меня нет улик, просто чутьё: {t}.',
   'Хватит болтовни, предлагаю проверить {t}.', 'Если {t} невиновен, пусть объяснит своё поведение.',
 ];
+const DEMO_INTROS = ['Всем привет, я {n}! Надеюсь, сегодня мы все друг друга поймём.', 'Здравствуйте, меня зовут {n}. Давайте играть честно.', 'Привет, народ! {n} на связи, рада видеть всех за столом.', 'Я {n}. Посмотрим, кто тут чем дышит.'];
 function demoSpeech(p) {
   const t = rnd(alive().filter(x => x !== p));
   return rnd(DEMO_LINES).replace('{t}', t ? t.name : 'кто-то');
@@ -216,11 +217,13 @@ function demoSpeech(p) {
 
 async function speechTurn(p, round) {
   const sys = systemPrompt(p);
-  const usr = `Что происходит в игре:\n${publicLog()}\n\nСейчас день, круг обсуждения ${round}. Твоя очередь говорить. Скажи 1–3 коротких предложения: выскажи подозрение, защиту или версию. Не больше 250 символов.`;
+  const usr = round === 0
+    ? `Что происходит в игре:\n${publicLog()}\n\nИгра только началась, ночи ещё НЕ было, никто не погиб, улик нет. Идёт знакомство за столом. Твоя очередь: коротко поприветствуй всех и представься в своём характере (1–2 предложения, до 200 символов). Никого пока не обвиняй и не упоминай ночь.`
+    : `Что происходит в игре:\n${publicLog()}\n\nСейчас день, круг обсуждения ${round}. Твоя очередь говорить. Скажи 1–3 коротких предложения: выскажи подозрение, защиту или версию. Не больше 250 символов.`;
   p.el.classList.add('thinking');
   let text = await llm(p, sys, usr, 160);
   p.el.classList.remove('thinking');
-  if (!text) text = demoSpeech(p);
+  if (!text) text = round === 0 ? rnd(DEMO_INTROS).replace('{n}', p.name) : demoSpeech(p);
   text = text.replace(/^\s*["«]|["»]\s*$/g, '').replace(new RegExp('^' + p.name + '\\s*[:—-]\\s*', 'i'), '');
   return text;
 }
@@ -429,15 +432,27 @@ async function nightPhase() {
   }
 }
 
+// Знакомство перед первой ночью: каждый представляется (круг 0)
+async function introPhase() {
+  setPhase('Знакомство'); setCenter('Знакомство');
+  await runTurns(alive().map(p => ({ p, r: 0 })));
+  await sleep(600);
+}
+
 async function dayPhase() {
   setCenter('Обсуждение');
-  // Конвейер: пока текущий игрок говорит, следующий уже думает и озвучивается
   const order = alive(), turns = [];
   for (let r = 1; r <= S.rounds; r++) order.forEach(p => turns.push({ p, r }));
+  await runTurns(turns);
+  await voting();
+}
+
+// Конвейер: пока текущий игрок говорит, следующий уже думает и озвучивается
+async function runTurns(turns) {
   let pending = prepTurn(turns[0].p, turns[0].r);
   for (let i = 0; i < turns.length; i++) {
     const { p, r } = turns[i];
-    if (i === 0 || turns[i - 1].r !== r) announce(`Круг обсуждения ${r}.`);
+    if (i === 0 || turns[i - 1].r !== r) announce(r === 0 ? 'Игроки знакомятся за столом.' : `Круг обсуждения ${r}.`);
     await gate();
     const cur = await pending;                       // текст готов
     pending = i + 1 < turns.length ? prepTurn(turns[i + 1].p, turns[i + 1].r) : null;
@@ -447,7 +462,9 @@ async function dayPhase() {
     await say(p, cur.text, url);
     $('subtitle').textContent = '';
   }
-  // голосование
+}
+
+async function voting() {
   setPhase(`Голосование (день ${G.night})`); setCenter('Голосование');
   announce('Голосование! Каждый называет, кого казнить.');
   const tally = {}, cand = alive();
@@ -482,6 +499,7 @@ async function runGame() {
     if (p.role === 'mafia') p.notes.push('Мафия: ' + G.players.filter(x => x.role === 'mafia').map(x => x.name).join(', '));
   });
   try {
+    await introPhase(); if (token !== runToken) return;
     while (!winner()) {
       await nightPhase(); if (token !== runToken) return;
       if (winner()) break;
