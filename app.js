@@ -2,6 +2,8 @@
 
 /* ================= Настройки ================= */
 const OPENAI_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/openai';
+const GEMINI_VOICES = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Leda', 'Orus', 'Aoede', 'Zephyr', 'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba', 'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar', 'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi', 'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat'];
 const COLORS = ['#e0584a', '#e0a04a', '#7bc96f', '#4ab3e0', '#9a6be0', '#e06bb6', '#4ae0c0', '#c0c04a', '#e08a6b', '#6b8ae0'];
 
 const DEFAULT_PLAYERS = [
@@ -12,10 +14,10 @@ const DEFAULT_PLAYERS = [
   { name: 'Дана',  avatar: '👩‍🎤', voiceO: 'coral',   persona: 'импульсивная, шумная' },
   { name: 'Егор',  avatar: '🤓',    voiceO: 'ash',     persona: 'логик, строит версии по фактам' },
   { name: 'Жанна', avatar: '💃',    voiceO: 'sage',    persona: 'хитрая, дружелюбная' },
-].map(p => ({ model: '', voiceB: '', ...p }));
+].map((p, i) => ({ model: '', voiceB: '', voiceG: GEMINI_VOICES[i % GEMINI_VOICES.length], ...p }));
 
 const DEFAULTS = {
-  base: 'https://api.openai.com/v1', key: '', model: 'gpt-4o-mini', temp: 0.9,
+  base: 'https://api.openai.com/v1', key: '', gKey: '', gTtsModel: 'gemini-2.5-flash-preview-tts', model: 'gpt-4o-mini', temp: 0.9,
   tts: 'openai', ttsModel: 'gpt-4o-mini-tts', ttsBase: '', ttsKey: '', rate: 1,
   lang: 'русский', rounds: 2, showRoles: true, players: DEFAULT_PLAYERS,
 };
@@ -42,7 +44,7 @@ let G = null;            // текущая игра
 let runToken = 0;        // для остановки
 let paused = false;
 
-function isDemo() { return !S.key.trim(); }
+function isDemo() { return !S.key.trim() && !(S.gKey || '').trim(); }
 
 async function gate() {              // пауза / стоп
   while (paused) await sleep(150);
@@ -103,18 +105,34 @@ function announce(text, cls = 'sys') {
 /* ================= LLM ================= */
 function playerModel(p) { return (p.model || S.model || 'gpt-4o-mini').trim(); }
 
+// Куда слать запрос: модели "gemini:..." / "gemini-..." (при заданном Gemini-ключе) идут на Gemini,
+// остальные — на основной Base URL. Если задан только Gemini-ключ, всё идёт на Gemini.
+function resolveTarget(p) {
+  let model = playerModel(p);
+  const gKey = (S.gKey || '').trim(), key = (S.key || '').trim();
+  const wantsG = /^gemini:/i.test(model) || (/^gemini-/i.test(model) && gKey) || (!key && gKey);
+  if (wantsG) {
+    model = model.replace(/^gemini:/i, '');
+    if (!/^gemini-/i.test(model)) model = 'gemini-2.5-flash';
+    return { gemini: true, url: GEMINI_BASE + '/chat/completions', key: gKey || key, model };
+  }
+  return { gemini: false, url: S.base.replace(/\/+$/, '') + '/chat/completions', key, model };
+}
+
 async function llm(p, system, user, maxTokens = 220) {
   if (isDemo()) return null;
-  const url = S.base.replace(/\/+$/, '') + '/chat/completions';
+  const t = resolveTarget(p);
+  const url = t.url;
   const body = {
-    model: playerModel(p), temperature: Number(S.temp), max_tokens: maxTokens,
+    model: t.model, temperature: Number(S.temp), max_tokens: t.gemini ? maxTokens + 1024 : maxTokens,
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
   };
+  if (t.gemini) body.reasoning_effort = 'low';   // чтобы «мысли» не съели лимит токенов
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const r = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + S.key.trim() },
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t.key },
         body: JSON.stringify(body),
       });
       if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 200));
@@ -204,8 +222,57 @@ async function speak(p, text) {
     const ok = await speakOpenAI(p, text);
     if (ok) return;
   }
-  if (S.tts === 'browser' || S.tts === 'openai') return speakBrowser(p, text);
+  if (S.tts === 'gemini' && (S.gKey || '').trim()) {
+    const ok = await speakGemini(p, text);
+    if (ok) return;
+  }
+  if (S.tts !== 'off') return speakBrowser(p, text);
   await sleep(Math.min(6000, 700 + text.length * 45));
+}
+
+// Gemini TTS: generateContent -> base64 PCM (24 кГц, 16 бит, моно) -> WAV
+function pcmToWav(pcm, rate = 24000) {
+  const h = new ArrayBuffer(44), v = new DataView(h);
+  const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); v.setUint32(4, 36 + pcm.length, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, pcm.length, true);
+  return new Blob([h, pcm], { type: 'audio/wav' });
+}
+async function speakGemini(p, text) {
+  const model = (S.gTtsModel || 'gemini-2.5-flash-preview-tts').trim();
+  try {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': S.gKey.trim() },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: `Скажи как живой человек за игровым столом (${p.persona || 'обычный характер'}): ${text}` }] }],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: p.voiceG || GEMINI_VOICES[p.id % GEMINI_VOICES.length] } } },
+        },
+      }),
+    });
+    if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 160));
+    const j = await r.json();
+    const b64 = j.candidates?.[0]?.content?.parts?.find(x => x.inlineData)?.inlineData?.data;
+    if (!b64) throw new Error('нет аудио в ответе');
+    const bin = atob(b64), pcm = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) pcm[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(pcmToWav(pcm));
+    await new Promise(resolve => {
+      const a = new Audio(url); currentAudio = a; a.playbackRate = Math.min(2, Math.max(0.5, Number(S.rate) || 1));
+      a.onended = a.onerror = () => { URL.revokeObjectURL(url); currentAudio = null; resolve(); };
+      a.play().catch(() => resolve());
+    });
+    return true;
+  } catch (e) {
+    console.warn('Gemini TTS error', e);
+    chat('event', '⚠ Ошибка Gemini TTS, перехожу на браузерный голос: ' + e.message);
+    S.tts = 'browser';
+    return false;
+  }
 }
 
 async function speakOpenAI(p, text) {
@@ -278,7 +345,7 @@ function setupGame() {
   const sh = shuffle(roles);
   G = {
     players: list.map((c, i) => ({
-      id: i, name: c.name || 'Игрок ' + (i + 1), avatar: c.avatar, model: c.model, voiceO: c.voiceO, voiceB: c.voiceB,
+      id: i, name: c.name || 'Игрок ' + (i + 1), avatar: c.avatar, model: c.model, voiceO: c.voiceO, voiceB: c.voiceB, voiceG: c.voiceG,
       persona: c.persona, color: COLORS[i % COLORS.length], role: sh[i], alive: true, notes: [],
     })),
     log: [], night: 0, token: runToken,
@@ -433,6 +500,7 @@ function voiceOptionsHTML(p) {
     const v = browserVoices();
     return '<option value="">авто</option>' + v.map(x => `<option value="${x.name}" ${x.name === p.voiceB ? 'selected' : ''}>${x.name} (${x.lang})</option>`).join('');
   }
+  if (S.tts === 'gemini') return GEMINI_VOICES.map(x => `<option ${x === p.voiceG ? 'selected' : ''}>${x}</option>`).join('');
   return OPENAI_VOICES.map(x => `<option ${x === p.voiceO ? 'selected' : ''}>${x}</option>`).join('');
 }
 
@@ -455,7 +523,7 @@ function renderPlayersEditor() {
     row.querySelector('[data-k=avatar]').oninput = e => p.avatar = e.target.value;
     row.querySelector('[data-k=name]').oninput = e => p.name = e.target.value;
     row.querySelector('[data-k=model]').oninput = e => p.model = e.target.value;
-    sel.onchange = e => { if (S.tts === 'browser') p.voiceB = e.target.value; else p.voiceO = e.target.value; };
+    sel.onchange = e => { if (S.tts === 'browser') p.voiceB = e.target.value; else if (S.tts === 'gemini') p.voiceG = e.target.value; else p.voiceO = e.target.value; };
     const [test, del] = row.querySelectorAll('button');
     test.onclick = async () => {
       readSettings();
@@ -468,6 +536,7 @@ function renderPlayersEditor() {
   });
 }
 function fillSettings() {
+  $('sGKey').value = S.gKey || ''; $('sGTtsModel').value = S.gTtsModel || '';
   $('sBase').value = S.base; $('sKey').value = S.key; $('sModel').value = S.model; $('sTemp').value = S.temp;
   $('sTts').value = S.tts; $('sTtsModel').value = S.ttsModel; $('sTtsBase').value = S.ttsBase; $('sTtsKey').value = S.ttsKey;
   $('sRate').value = S.rate; $('rateVal').textContent = S.rate; $('sLang').value = S.lang;
@@ -475,6 +544,7 @@ function fillSettings() {
   draft = structuredClone(S.players); renderPlayersEditor();
 }
 function readSettings() {
+  S.gKey = $('sGKey').value; S.gTtsModel = $('sGTtsModel').value.trim() || DEFAULTS.gTtsModel;
   S.base = $('sBase').value.trim() || DEFAULTS.base; S.key = $('sKey').value; S.model = $('sModel').value.trim() || DEFAULTS.model;
   S.temp = $('sTemp').value || 0.9; S.tts = $('sTts').value; S.ttsModel = $('sTtsModel').value.trim();
   S.ttsBase = $('sTtsBase').value.trim(); S.ttsKey = $('sTtsKey').value; S.rate = $('sRate').value;
@@ -492,7 +562,7 @@ $('sRate').oninput = e => $('rateVal').textContent = e.target.value;
 $('sTts').onchange = () => { S.tts = $('sTts').value; renderPlayersEditor(); };
 $('btnAddPlayer').onclick = () => {
   if (draft.length >= 10) return alert('Максимум 10 игроков');
-  draft.push({ name: 'Игрок ' + (draft.length + 1), avatar: rnd(['😎', '🦊', '🐱', '🤖', '🧙', '👽']), model: '', voiceO: rnd(OPENAI_VOICES), voiceB: '', persona: '' });
+  draft.push({ name: 'Игрок ' + (draft.length + 1), avatar: rnd(['😎', '🦊', '🐱', '🤖', '🧙', '👽']), model: '', voiceO: rnd(OPENAI_VOICES), voiceB: '', voiceG: rnd(GEMINI_VOICES), persona: '' });
   renderPlayersEditor();
 };
 $('btnReset').onclick = () => { draft = structuredClone(DEFAULT_PLAYERS); renderPlayersEditor(); };

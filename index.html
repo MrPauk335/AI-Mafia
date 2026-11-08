@@ -50,6 +50,7 @@
             <option value="https://openrouter.ai/api/v1">
             <option value="https://api.groq.com/openai/v1">
             <option value="https://api.deepseek.com/v1">
+            <option value="https://generativelanguage.googleapis.com/v1beta/openai">
           </datalist>
         </label>
         <label>API ключ
@@ -60,6 +61,9 @@
           <datalist id="modelList">
             <option value="gpt-4o-mini">
             <option value="gpt-4o">
+            <option value="gemini:gemini-2.5-flash">
+            <option value="gemini:gemini-2.5-pro">
+            <option value="gemini:gemini-2.5-flash-lite">
             <option value="openai/gpt-4o-mini">
             <option value="anthropic/claude-3.5-sonnet">
             <option value="google/gemini-flash-1.5">
@@ -71,6 +75,15 @@
           <input id="sTemp" type="number" min="0" max="2" step="0.1">
         </label>
       </div>
+      <div class="grid2" style="margin-top:10px">
+        <label>Gemini API ключ (aistudio.google.com/apikey)
+          <input id="sGKey" type="password" placeholder="AIza...">
+        </label>
+        <label>Gemini TTS модель
+          <input id="sGTtsModel" placeholder="gemini-2.5-flash-preview-tts">
+        </label>
+      </div>
+      <p class="hint">Gemini: в поле модели игрока пиши <b>gemini:gemini-2.5-flash</b> (или просто gemini-2.5-flash) — он пойдёт на Gemini со своим ключом, остальные игроки на основной Base URL. Так можно мешать GPT, Claude, Gemini в одной партии. Если задан только Gemini-ключ, играют все на Gemini.</p>
       <p class="hint">Ключ хранится только в localStorage твоего браузера и уходит только на указанный Base URL. Без ключа включается демо-режим с заготовленными репликами.</p>
 
       <h3>Озвучка (TTS)</h3>
@@ -78,6 +91,7 @@
         <label>Движок
           <select id="sTts">
             <option value="openai">OpenAI TTS (качественный)</option>
+            <option value="gemini">Gemini TTS (30 голосов)</option>
             <option value="browser">Браузерный (бесплатный)</option>
             <option value="off">Выключена</option>
           </select>
