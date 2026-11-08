@@ -70,6 +70,14 @@ body.night .table { filter: brightness(.35) saturate(.7); }
   transition: transform .25s, box-shadow .25s, border-color .25s;
   position: relative;
 }
+/* аватарка из листа assets/avatars.webp: нужная ячейка выбирается через --nx/--ny (px на листе) */
+.avatar { --s: 66px; }
+.avatar.spr {
+  background-image: url(assets/avatars.webp); background-repeat: no-repeat; background-color: #0b0b12;
+  background-size: calc(var(--s) * 1.06 * 1759 / 166) calc(var(--s) * 1.06 * 707 / 166);
+  background-position: calc(var(--s) * 1.06 * var(--nx) / 166 - var(--s) * .03) calc(var(--s) * 1.06 * var(--ny) / 166 - var(--s) * .03);
+}
+.avatar.apreview { width: 50px; height: 50px; border-width: 2px; font-size: 24px; cursor: pointer; --s: 46px; box-shadow: none; }
 .seat .name { margin-top: 6px; font-weight: 700; font-size: 14px; text-shadow: 0 1px 3px #000; }
 .seat .model { font-size: 10px; color: var(--muted); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .seat .role {
@@ -119,7 +127,7 @@ body.show-roles .seat .role { display: block; }
 .seat.below .bubble::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: #fff; }
 
 .subtitle {
-  min-height: 24px; margin-top: 8px; color: var(--muted); font-size: 14px; text-align: center; max-width: 760px;
+  min-height: 24px; margin-top: 58px;   /* ниже подписи нижнего игрока, чтобы не наезжала */ color: var(--muted); font-size: 14px; text-align: center; max-width: 760px;
 }
 
 .chat { width: 340px; background: var(--bg2); border-left: 1px solid #2c2f47; display: flex; flex-direction: column; min-height: 0; }
@@ -163,6 +171,7 @@ input[type=range] { padding: 0; }
   .chat { width: 100%; height: 220px; border-left: 0; border-top: 1px solid #2c2f47; }
   .grid2 { grid-template-columns: 1fr; }
   .prow { grid-template-columns: 50px 1fr 1fr; }
-  .seat { width: 84px; } .avatar { width: 54px; height: 54px; font-size: 28px; }
+  .seat { width: 84px; } .avatar { width: 54px; height: 54px; font-size: 28px; --s: 46px; }
+  .avatar.apreview { width: 50px; height: 50px; --s: 46px; }
   .speech { width: 62%; font-size: 12px; padding: 8px 10px; }
 }

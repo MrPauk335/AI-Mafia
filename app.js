@@ -37,6 +37,7 @@ const DEFAULT_PLAYERS = [
 
 const DEFAULTS = {
   keys: {}, customBase: '', gTtsModel: 'gemini-2.5-flash-preview-tts', temp: 0.9,
+  avatarMode: 'art',
   elevenKey: '', elevenModel: 'eleven_flash_v2_5', elevenVoices: [],
   tts: 'openai', ttsModel: 'gpt-4o-mini-tts', rate: 1,
   lang: 'русский', rounds: 2, showRoles: true, players: DEFAULT_PLAYERS,
@@ -88,11 +89,36 @@ async function gate() {              // пауза / стоп
 function alive() { return G.players.filter(p => p.alive); }
 function aliveOf(role) { return G.players.filter(p => p.alive && p.role === role); }
 
+/* ================= Аватарки ================= */
+// Аватарка подбирается по модели игрока (бренд). seen — счётчик, чтобы игроки одного бренда получали разные арты.
+// Если бренд не определён или режим «выкл» — берётся ручная аватарка (эмодзи / URL).
+function paintAvatar(el, p, seen) {
+  el.classList.remove('spr'); el.textContent = '';
+  el.style.background = ''; el.style.backgroundImage = ''; el.style.backgroundSize = '';
+  const brand = S.avatarMode === 'off' ? null : brandOf(p.provider, modelOf(p));
+  if (brand) {
+    const logo = S.avatarMode === 'logo';
+    const n = seen ? (seen[brand] = (seen[brand] ?? -1) + 1) : 0;
+    const v = logo ? 4 : n % 4;
+    if (SPRITE[brand]) {
+      el.classList.add('spr');
+      el.style.setProperty('--nx', -COLX[SPRITE[brand].g * 5 + v]);
+      el.style.setProperty('--ny', -ROWY[SPRITE[brand].r]);
+    } else {
+      el.style.backgroundImage = `url("${svgAvatar(brand, v % 4)}")`; el.style.backgroundSize = 'cover';
+    }
+    el.title = brand; return;
+  }
+  el.style.background = `radial-gradient(circle at 30% 25%, ${p.color || '#555'}, #1a1b26 130%)`;
+  if (/^(https?:|data:)/.test(p.avatar || '')) { el.style.backgroundImage = `url("${p.avatar}")`; el.style.backgroundSize = 'cover'; }
+  else el.textContent = p.avatar || '🙂';
+}
+
 /* ================= Рендер стола ================= */
 function renderTable() {
   const seats = $('seats');
   seats.innerHTML = '';
-  const n = G.players.length;
+  const n = G.players.length, seen = {};
   G.players.forEach((p, i) => {
     const ang = Math.PI / 2 + (i * 2 * Math.PI) / n;       // старт снизу
     const x = 50 + 46 * Math.cos(ang) * 1.0;
@@ -104,9 +130,7 @@ function renderTable() {
 
     const bubble = document.createElement('div'); bubble.className = 'bubble';
     const av = document.createElement('div'); av.className = 'avatar';
-    av.style.background = `radial-gradient(circle at 30% 25%, ${p.color}, #1a1b26 130%)`;
-    if (/^(https?:|data:)/.test(p.avatar)) { av.style.backgroundImage = `url("${p.avatar}")`; }
-    else av.textContent = p.avatar || '🙂';
+    paintAvatar(av, p, seen);
     const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = p.name;
     const md = document.createElement('div'); md.className = 'model'; md.textContent = !p.provider ? '' : (hasKey(p) ? modelLabel(p) : 'демо');
     const rl = document.createElement('div'); rl.className = 'role ' + p.role; rl.textContent = ROLE_NAME[p.role];
@@ -418,7 +442,7 @@ function speakBrowser(p, text) {
 // Показывает реплику и сразу играет уже загруженное аудио (текст и голос появляются вместе)
 async function say(p, text, url, tag) {
   chat(tag ? 'night' : '', text, p.name + (tag || ''), p.color);
-  $('subtitle').textContent = `${p.name}: ${text}`;
+  $('subtitle').textContent = '';                 // реплика уже в центре стола, дубль внизу не нужен
   $('speechName').textContent = p.name + (tag || '');
   $('speechName').style.color = p.color; $('speech').style.borderLeftColor = p.color;
   $('speechText').textContent = text; $('speech').scrollTop = 0;
@@ -685,18 +709,23 @@ function renderPlayersEditor() {
   draft.forEach((p, i) => {
     const row = document.createElement('div'); row.className = 'prow';
     row.innerHTML = `
-      <input data-k="avatar" value="" title="Эмодзи или URL картинки" style="text-align:center;font-size:22px">
+      <div class="avatar apreview" data-k="avatar" title="Аватарка подбирается по модели. Клик — задать эмодзи/URL вручную"></div>
       <input data-k="name" placeholder="Имя">
       <select data-k="provider" title="Провайдер (чей ключ используется)"></select>
       <input data-k="model" placeholder="модель">
       <select data-k="voice"></select>
       <button class="mini" title="Проверить голос">🔊</button>
       <button class="mini" title="Удалить">🗑</button>`;
-    row.querySelector('[data-k=avatar]').value = p.avatar;
+    const prev = row.querySelector('[data-k=avatar]');
+    const repaint = () => paintAvatar(prev, { ...p, id: i, color: COLORS[i % COLORS.length] }, null);
+    repaint();
     row.querySelector('[data-k=name]').value = p.name;
     row.querySelector('[data-k=model]').value = p.model || '';
     const sel = row.querySelector('[data-k=voice]'); sel.innerHTML = voiceOptionsHTML(p);
-    row.querySelector('[data-k=avatar]').oninput = e => p.avatar = e.target.value;
+    prev.onclick = () => {
+      const v = prompt('Эмодзи или URL картинки (используется, если по модели аватарка не определилась или режим «выкл»):', p.avatar || '');
+      if (v !== null) { p.avatar = v.trim(); repaint(); }
+    };
     row.querySelector('[data-k=name]').oninput = e => p.name = e.target.value;
     const provSel = row.querySelector('[data-k=provider]'), modelIn = row.querySelector('[data-k=model]');
     provSel.innerHTML = '<option value="">Авто (по очереди)</option>' +
@@ -710,8 +739,8 @@ function renderPlayersEditor() {
       modelIn.disabled = !pv;
     };
     syncModel();
-    provSel.onchange = e => { p.provider = e.target.value; p.model = ''; modelIn.value = ''; syncModel(); };
-    modelIn.oninput = e => p.model = e.target.value;
+    provSel.onchange = e => { p.provider = e.target.value; p.model = ''; modelIn.value = ''; syncModel(); repaint(); };
+    modelIn.oninput = e => { p.model = e.target.value; repaint(); };
     sel.onchange = e => { if (S.tts === 'browser') p.voiceB = e.target.value; else if (S.tts === 'eleven') p.voiceE = e.target.value; else if (S.tts === 'gemini') p.voiceG = e.target.value; else p.voiceO = e.target.value; };
     const [test, del] = row.querySelectorAll('button');
     test.onclick = async () => {
@@ -748,7 +777,7 @@ function fillSettings() {
   $('elevenStatus').textContent = S.elevenVoices?.length ? `Загружено голосов: ${S.elevenVoices.length}` : '';
   $('sTts').value = S.tts; $('sTtsModel').value = S.ttsModel;
   $('sRate').value = S.rate; $('rateVal').textContent = S.rate; $('sLang').value = S.lang;
-  $('sRounds').value = S.rounds; $('sShowRoles').checked = S.showRoles;
+  $('sRounds').value = S.rounds; $('sShowRoles').checked = S.showRoles; $('sAvatarMode').value = S.avatarMode || 'art';
   draft = structuredClone(S.players); renderPlayersEditor();
 }
 function readSettings() {
@@ -760,8 +789,10 @@ function readSettings() {
   S.temp = $('sTemp').value || 0.9; S.tts = $('sTts').value; S.ttsModel = $('sTtsModel').value.trim();
   S.rate = $('sRate').value;
   S.lang = $('sLang').value.trim() || 'русский'; S.rounds = Math.max(1, Math.min(4, +$('sRounds').value || 2));
+  S.avatarMode = $('sAvatarMode').value;
   S.showRoles = $('sShowRoles').checked; S.players = structuredClone(draft);
 }
+$('sAvatarMode').onchange = () => { S.avatarMode = $('sAvatarMode').value; renderPlayersEditor(); };
 $('btnSettings').onclick = () => { fillSettings(); $('settingsModal').hidden = false; };
 $('btnCloseSettings').onclick = () => { $('settingsModal').hidden = true; };
 $('btnSave').onclick = () => {
@@ -783,7 +814,7 @@ if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged = () => {};
 /* предпросмотр стола до начала игры */
 function previewTable() {
   G = {
-    players: S.players.map((c, i) => ({ id: i, name: c.name, avatar: c.avatar, model: c.model, color: COLORS[i % COLORS.length], role: 'civilian', alive: true, notes: [] })),
+    players: S.players.map((c, i) => ({ id: i, name: c.name, avatar: c.avatar, provider: c.provider || '', model: c.model, color: COLORS[i % COLORS.length], role: 'civilian', alive: true, notes: [] })),
     log: [],
   };
   renderTable(); document.body.classList.remove('show-roles');
