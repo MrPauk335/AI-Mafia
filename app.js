@@ -419,10 +419,13 @@ function speakBrowser(p, text) {
 async function say(p, text, url, tag) {
   chat(tag ? 'night' : '', text, p.name + (tag || ''), p.color);
   $('subtitle').textContent = `${p.name}: ${text}`;
-  p.bubble.textContent = text;
+  $('speechName').textContent = p.name + (tag || '');
+  $('speechName').style.color = p.color; $('speech').style.borderLeftColor = p.color;
+  $('speechText').textContent = text; $('speech').scrollTop = 0;
+  $('speech').classList.add('show');
   p.el.classList.add('speaking');
-  await speak(p, text, url);
-  p.el.classList.remove('speaking');
+  try { await speak(p, text, url); }
+  finally { p.el.classList.remove('speaking'); $('speech').classList.remove('show'); }
 }
 
 // Готовит реплику: текст от модели -> сразу в лог (чтобы следующий игрок её видел),
@@ -477,7 +480,7 @@ const NIGHT_DEMO = [
 async function nightAct(p, intro, cands) {
   const sys = systemPrompt(p);
   const usr = `Что происходит в игре:\n${publicLog()}\n\n${intro}\nВарианты: ${cands.map(c => c.name).join(', ')}.\n` +
-    `Скажи вслух от первого лица 2–3 предложения: кого выбираешь и ПОЧЕМУ (опирайся на то, что реально звучало за столом). Закончи фразой «Мой выбор: Имя».`;
+    `Скажи вслух от первого лица 2–3 коротких предложения (не больше 300 символов): кого выбираешь и ПОЧЕМУ (опирайся на то, что реально звучало за столом). Закончи фразой «Мой выбор: Имя».`;
   p.el.classList.add('thinking');
   let text = await llm(p, sys, usr, 220);
   p.el.classList.remove('thinking');

@@ -105,7 +105,16 @@ body.show-roles .seat .role { display: block; }
   content: ""; position: absolute; top: 100%; left: 50%; margin-left: -7px;
   border: 7px solid transparent; border-top-color: #fff;
 }
-.seat.speaking .bubble { display: block; }
+.seat.speaking .bubble { display: none; }   /* реплика показывается в центре стола, чтобы не закрывать соседей */
+.speech {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(430px, 50%); max-height: 42%; overflow-y: auto; z-index: 6; display: none;
+  background: #fff; color: #15161f; padding: 10px 14px; border-radius: 14px; border-left: 6px solid var(--accent);
+  box-shadow: 0 10px 30px rgba(0,0,0,.6); font-size: 14px; line-height: 1.4;
+}
+.speech.show { display: block; animation: pop .18s ease-out; }
+.speech-name { font-weight: 800; margin-bottom: 3px; font-size: 13px; }
+@keyframes pop { from { opacity: 0; transform: translate(-50%, -46%); } to { opacity: 1; transform: translate(-50%, -50%); } }
 .seat.below .bubble { bottom: auto; top: 100%; margin: 8px 0 0; }
 .seat.below .bubble::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: #fff; }
 
@@ -155,5 +164,5 @@ input[type=range] { padding: 0; }
   .grid2 { grid-template-columns: 1fr; }
   .prow { grid-template-columns: 50px 1fr 1fr; }
   .seat { width: 84px; } .avatar { width: 54px; height: 54px; font-size: 28px; }
-  .bubble { width: 180px; font-size: 12px; }
+  .speech { width: 62%; font-size: 12px; padding: 8px 10px; }
 }
