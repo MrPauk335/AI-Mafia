@@ -9,7 +9,6 @@
 <body>
 <header class="topbar">
   <div class="brand">🎭 AI Mafia</div>
-  <div id="phase" class="phase">Ожидание начала</div>
   <div class="controls">
     <button id="btnStart" class="btn primary">▶ Начать игру</button>
     <button id="btnPause" class="btn" disabled>⏸ Пауза</button>
@@ -21,17 +20,41 @@
 <main class="layout">
   <section class="stage" id="stage">
     <div class="table-wrap" id="tableWrap">
-      <div class="table"><div class="table-center" id="tableCenter">Мафия</div></div>
+      <div class="scene-bg">
+        <div class="wall-band"></div>
+        <div class="win w1"></div><div class="win w2"></div>
+        <div class="lamp l1"></div><div class="lamp l2"></div><div class="lamp l3"></div>
+        <div class="table"></div>
+      </div>
+
+      <div class="banner">
+        <svg class="ico sun" viewBox="0 0 64 64" aria-hidden="true"><g stroke="#ffb020" stroke-width="5" stroke-linecap="round"><path d="M32 4v8M32 52v8M4 32h8M52 32h8M12 12l6 6M46 46l6 6M12 52l6-6M46 18l6-6"/></g><circle cx="32" cy="32" r="13" fill="#ffd23a"/></svg>
+        <svg class="ico moon" viewBox="0 0 64 64" aria-hidden="true"><path d="M44 10a24 24 0 1 0 10 38A20 20 0 0 1 44 10z" fill="#cfd6ff"/></svg>
+        <div class="bn-text"><div class="bn-title" id="phase">ОЖИДАНИЕ НАЧАЛА</div><div class="bn-sub" id="tableCenter">МАФИЯ</div></div>
+      </div>
+
+      <aside class="chat">
+        <div class="chat-head">Чат стола</div>
+        <div class="chat-log" id="chatLog"></div>
+      </aside>
+
+      <svg class="toaster" viewBox="0 0 200 170" aria-hidden="true">
+        <defs><linearGradient id="tg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7fb0b4"/><stop offset="1" stop-color="#3f6a70"/></linearGradient></defs>
+        <path d="M30 36 Q100 6 170 36" stroke="#c9d2d6" stroke-width="6" fill="none" stroke-linecap="round" opacity=".5"/>
+        <rect x="22" y="40" width="156" height="110" rx="26" fill="url(#tg)" stroke="#1c3438" stroke-width="4"/>
+        <rect x="42" y="40" width="116" height="12" rx="6" fill="#16282b"/>
+        <rect x="176" y="70" width="14" height="30" rx="6" fill="#b8312c" stroke="#5b1512" stroke-width="3"/>
+        <ellipse cx="68" cy="94" rx="19" ry="23" fill="#fff" stroke="#1c3438" stroke-width="3"/><ellipse cx="132" cy="94" rx="19" ry="23" fill="#fff" stroke="#1c3438" stroke-width="3"/>
+        <circle cx="72" cy="98" r="8" fill="#1a1a22"/><circle cx="136" cy="98" r="8" fill="#1a1a22"/>
+        <path d="M46 70 L86 78 M154 70 L114 78" stroke="#1c3438" stroke-width="6" stroke-linecap="round"/>
+        <path d="M84 134 Q100 124 116 134" stroke="#1c3438" stroke-width="5" fill="none" stroke-linecap="round"/>
+      </svg>
+
       <div id="seats"></div>
       <div class="speech" id="speech"><div class="speech-name" id="speechName"></div><div id="speechText"></div></div>
     </div>
     <div class="subtitle" id="subtitle"></div>
   </section>
-
-  <aside class="chat">
-    <div class="chat-head">Чат стола</div>
-    <div class="chat-log" id="chatLog"></div>
-  </aside>
 </main>
 
 <div class="modal" id="settingsModal" hidden>
@@ -95,6 +118,7 @@
         <label class="check"><input id="sShowRoles" type="checkbox"> Показывать роли (режим зрителя)</label>
         <label>Аватарки по модели
           <select id="sAvatarMode">
+            <option value="ball">Шарики в шляпах (как на стриме)</option>
             <option value="art">Арт-мафиози (4 варианта на бренд)</option>
             <option value="logo">Логотипы брендов</option>
             <option value="off">Выкл (мои эмодзи / картинки)</option>

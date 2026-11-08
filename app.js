@@ -38,7 +38,7 @@ const DEFAULT_PLAYERS = [
 
 const DEFAULTS = {
   keys: {}, customBase: '', gTtsModel: 'gemini-2.5-flash-preview-tts', temp: 0.9,
-  avatarMode: 'art',
+  avatarMode: 'ball', styleV: 2,
   elevenKey: '', elevenModel: 'eleven_flash_v2_5', elevenVoices: [],
   tts: 'openai', ttsModel: 'gpt-4o-mini-tts', rate: 1,
   lang: 'русский', rounds: 2, showRoles: true, players: DEFAULT_PLAYERS,
@@ -50,6 +50,7 @@ function loadSettings() {
     const raw = JSON.parse(localStorage.getItem('aimafia') || 'null');
     if (raw) {
       const st = { ...DEFAULTS, ...raw };
+      if ((raw.styleV || 0) < 2) { st.avatarMode = 'ball'; st.styleV = 2; }   // новый стиль «шарики в шляпах» по умолчанию
       st.keys = { ...(raw.keys || {}) };
       // миграция со старого формата (один общий ключ + отдельный Gemini)
       if (raw.key && !st.keys.openai) st.keys.openai = raw.key;
@@ -72,6 +73,8 @@ const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const rnd = arr => arr[Math.floor(Math.random() * arr.length)];
 const shuffle = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const ROLE_ICON = { mafia: '😈', detective: '🕵️', doctor: '💉', civilian: '😀' };
+const ROLE_SHORT = { mafia: 'мафия', detective: 'комиссар', doctor: 'доктор', civilian: 'мирный' };
 const ROLE_NAME = { mafia: 'Мафия', detective: 'Комиссар', doctor: 'Доктор', civilian: 'Мирный житель' };
 
 /* ================= Состояние игры ================= */
@@ -95,9 +98,14 @@ function aliveOf(role) { return G.players.filter(p => p.alive && p.role === role
 // Аватарка подбирается по модели игрока (бренд). seen — счётчик, чтобы игроки одного бренда получали разные арты.
 // Если бренд не определён или режим «выкл» — берётся ручная аватарка (эмодзи / URL).
 function paintAvatar(el, p, seen) {
-  el.classList.remove('spr'); el.textContent = '';
+  el.classList.remove('spr', 'ball'); el.textContent = '';
   el.style.background = ''; el.style.backgroundImage = ''; el.style.backgroundSize = '';
   const brand = S.avatarMode === 'off' ? null : brandOf(p.provider, modelOf(p));
+  if (S.avatarMode === 'ball') {
+    const i = Math.max(0, G ? G.players.indexOf(p) : 0);
+    el.classList.add('ball'); el.innerHTML = ballSvg(brand, p.color, i % 3, [-.8, .5, 0, .9, -.4, .7][i % 6]);
+    el.title = brand || ''; return;
+  }
   if (brand) {
     const logo = S.avatarMode === 'logo';
     const n = seen ? (seen[brand] = (seen[brand] ?? -1) + 1) : 0;
@@ -120,36 +128,68 @@ function paintAvatar(el, p, seen) {
 function renderTable() {
   const seats = $('seats');
   seats.innerHTML = '';
-  const n = G.players.length, seen = {};
+  const seen = {};
   G.players.forEach((p, i) => {
-    const ang = Math.PI / 2 + (i * 2 * Math.PI) / n;       // старт снизу
-    const x = 50 + 46 * Math.cos(ang) * 1.0;
-    const y = 50 + 44 * Math.sin(ang);
     const el = document.createElement('div');
-    el.className = 'seat' + (y < 45 ? ' below' : '');
-    el.style.left = x + '%'; el.style.top = y + '%';
+    el.className = 'seat';
     el.dataset.id = p.id;
 
     const bubble = document.createElement('div'); bubble.className = 'bubble';
     const av = document.createElement('div'); av.className = 'avatar';
     paintAvatar(av, p, seen);
-    const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = p.name;
-    const md = document.createElement('div'); md.className = 'model'; md.textContent = !p.provider ? '' : (hasKey(p) ? modelLabel(p) : 'демо');
-    const rl = document.createElement('div'); rl.className = 'role ' + p.role; rl.textContent = ROLE_NAME[p.role];
-    el.append(bubble, av, nm, md, rl);
+    const nm = document.createElement('div'); nm.className = 'name';
+    const num = document.createElement('span'); num.className = 'num'; num.textContent = '№' + (i + 1);
+    nm.append(num, document.createTextNode(p.name));
+    const md = document.createElement('div'); md.className = 'model';
+    md.textContent = p.provider && !hasKey(p) ? 'демо' : '';
+    el.title = !p.provider ? '' : modelLabel(p);
+    const rl = document.createElement('div'); rl.className = 'role ' + p.role; rl.textContent = ROLE_ICON[p.role] + ' ' + ROLE_SHORT[p.role];
+    el.append(bubble, av, nm, rl, md);
     seats.appendChild(el);
     p.el = el; p.bubble = bubble;
   });
+  layoutSeats();
   document.body.classList.toggle('show-roles', !!S.showRoles);
 }
+// Рассаживает игроков дугой вдоль стола (на узком экране — в два ряда)
+function layoutSeats() {
+  if (!G) return;
+  const wr = $('tableWrap'), W = wr.clientWidth, H = wr.clientHeight, n = G.players.length;
+  if (!W) return;
+  const narrow = W < 700;
+  const rows = narrow && n > 4 ? 2 : 1;
+  const per = Math.ceil(n / rows);
+  const ball = Math.min(narrow ? 22 : 11.2, 90 / per) * W / 100;
+  wr.style.setProperty('--ball', ball + 'px');
+  G.players.forEach((p, i) => {
+    const r = rows === 2 ? (i < per ? 0 : 1) : 0, k = rows === 2 ? (r ? i - per : i) : i;
+    const cnt = rows === 2 ? (r ? n - per : per) : n;
+    const t = cnt > 1 ? k / (cnt - 1) : .5;
+    const x = 8 + 84 * t;
+    let y;
+    if (rows === 1) y = 55 - 7 * Math.sin(Math.PI * t) + 4;      // дуга: края ниже, середина выше
+    else y = (r ? 66 : 40) - 3 * Math.sin(Math.PI * t);
+    p.el.style.left = (x * W / 100) + 'px'; p.el.style.top = (y * H / 100) + 'px';
+  });
+}
+window.addEventListener('resize', layoutSeats);
 function refreshSeats() {
   G.players.forEach(p => p.el.classList.toggle('dead', !p.alive));
 }
 function setNight(on) {
   document.body.classList.toggle('night', on);
 }
-function setPhase(t) { $('phase').textContent = t; }
-function setCenter(t) { $('tableCenter').textContent = t; }
+// Табло раунда сверху: «РАУНД: 1 / ДЕНЬ, ОБСУЖДЕНИЕ»
+const BN = { phase: '', center: '' };
+function renderBanner() {
+  const m = BN.phase.match(/d+/), word = BN.phase.split(/[ (]/)[0];
+  let title, sub;
+  if (m) { title = 'РАУНД: ' + m[0]; sub = word.toLowerCase() === BN.center.toLowerCase() || !BN.center ? word : word + ', ' + BN.center; }
+  else { title = BN.phase; sub = BN.center.toLowerCase() === BN.phase.toLowerCase() ? '' : BN.center; }
+  $('phase').textContent = title.toUpperCase(); $('tableCenter').textContent = sub.toUpperCase();
+}
+function setPhase(t) { BN.phase = t; renderBanner(); }
+function setCenter(t) { BN.center = t; renderBanner(); }
 
 function chat(cls, html, who, color) {
   const log = $('chatLog');
@@ -463,13 +503,29 @@ function speakBrowser(p, text) {
   });
 }
 
+// Облачко над говорящим: сидит над головой игрока, хвостик указывает на него
+function placeSpeech(p) {
+  const wr = $('tableWrap'), sp = $('speech'), W = wr.clientWidth, H = wr.clientHeight;
+  const bw = Math.min(W * .46, 470);
+  sp.style.width = bw + 'px';
+  const sx = p.el.offsetLeft;
+  const top = Math.min(...G.players.map(q => q.el.offsetTop), p.el.offsetTop);
+  const my = W < 700 ? top : p.el.offsetTop;
+  const cx = Math.max(bw / 2 + 8, Math.min(W - bw / 2 - 8, sx));
+  sp.style.left = cx + 'px';
+  sp.style.bottom = (H - my + 12) + 'px';
+  $('speechText').style.maxHeight = Math.max(60, my - 12 - H * .17 - 40) + 'px';
+  sp.style.setProperty('--tail', Math.max(22, Math.min(bw - 22, sx - (cx - bw / 2))) + 'px');
+}
+
 // Показывает реплику и сразу играет уже загруженное аудио (текст и голос появляются вместе)
 async function say(p, text, url, tag) {
   chat(tag ? 'night' : '', text, p.name + (tag || ''), p.color);
   $('subtitle').textContent = '';                 // реплика уже в центре стола, дубль внизу не нужен
-  $('speechName').textContent = p.name + (tag || '');
-  $('speechName').style.color = p.color; $('speech').style.borderLeftColor = p.color;
+  $('speechName').textContent = tag ? p.name + tag : '';
+  $('speechName').style.color = '#6b4a8f';
   $('speechText').textContent = text; $('speech').scrollTop = 0;
+  placeSpeech(p);
   $('speech').classList.add('show');
   p.el.classList.add('speaking');
   try { await speak(p, text, url); }
