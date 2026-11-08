@@ -27,14 +27,15 @@ function elevenVoiceList() { return (S.elevenVoices && S.elevenVoices.length) ? 
 const COLORS = ['#e0584a', '#e0a04a', '#7bc96f', '#4ab3e0', '#9a6be0', '#e06bb6', '#4ae0c0', '#c0c04a', '#e08a6b', '#6b8ae0'];
 
 const DEFAULT_PLAYERS = [
-  { name: '', avatar: '👩‍🦰', voiceO: 'nova',    persona: 'эмоциональная, общительная' },
-  { name: '', avatar: '🧔',    voiceO: 'onyx',    persona: 'спокойный, рассудительный' },
-  { name: '', avatar: '👵',    voiceO: 'shimmer', persona: 'подозрительная, наблюдательная' },
-  { name: '', avatar: '🕵️',   voiceO: 'echo',    persona: 'саркастичный, любит давить на людей' },
-  { name: '', avatar: '👩‍🎤', voiceO: 'coral',   persona: 'импульсивная, шумная' },
-  { name: '', avatar: '🤓',    voiceO: 'ash',     persona: 'логик, строит версии по фактам' },
-  { name: '', avatar: '💃',    voiceO: 'sage',    persona: 'хитрая, дружелюбная' },
-].map((p, i) => ({ provider: '', model: '', voiceB: '', voiceG: GEMINI_VOICES[i % GEMINI_VOICES.length], ...p }));
+  { name: '', provider: 'openai',    model: 'gpt-4o-mini',      voiceO: 'alloy',   persona: 'харизматичный Дон мафии, рассудительный и дипломатичный' },
+  { name: '', provider: 'anthropic', model: 'claude-haiku-5-5', voiceO: 'sage',    persona: 'мудрый консильери, наблюдательный, строит логические цепочки' },
+  { name: '', provider: 'gemini',    model: 'gemini-2.5-flash', voiceO: 'nova',    persona: 'загадочная femme fatale, интуитивная и эмоциональная' },
+  { name: '', provider: 'deepseek',  model: 'deepseek-chat',    voiceO: 'onyx',    persona: 'хладнокровный детектив, подмечает несостыковки' },
+  { name: '', provider: 'grok',      model: 'grok-3-mini',      voiceO: 'ash',     persona: 'бунтарь и остряк, с чёрным юмором и провокациями' },
+  { name: '', provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct', voiceO: 'echo', persona: 'саркастичный и прямолинейный, любит давить фактами' },
+  { name: '', provider: 'openrouter', model: 'mistralai/mistral-large',           voiceO: 'coral', persona: 'азартный игрок, импульсивный, действует смело' },
+  { name: '', provider: 'openrouter', model: 'qwen/qwen-2.5-72b-instruct',       voiceO: 'shimmer', persona: 'хитрый стратег синдиката, вежливый, но опасный' },
+].map((p, i) => ({ avatar: '', voiceB: '', voiceG: GEMINI_VOICES[i % GEMINI_VOICES.length], ...p }));
 
 const DEFAULTS = {
   keys: {}, customBase: '', gTtsModel: 'gemini-2.5-flash-preview-tts', temp: 0.9,
@@ -54,12 +55,19 @@ function loadSettings() {
       // миграция со старого формата (один общий ключ + отдельный Gemini)
       if (raw.key && !st.keys.openai) st.keys.openai = raw.key;
       if (raw.gKey && !st.keys.gemini) st.keys.gemini = raw.gKey;
-      st.players = (raw.players || DEFAULT_PLAYERS).map(p => {
-        p = { provider: '', ...p };
-        if (['Алиса', 'Борис', 'Вера', 'Глеб', 'Дана', 'Егор', 'Жанна'].includes(p.name)) p.name = '';   // старые имена по умолчанию -> авто (имя нейросети)
-        if (/^gemini:/i.test(p.model || '')) { p.provider = 'gemini'; p.model = p.model.replace(/^gemini:/i, ''); }
-        return p;
-      });
+      // Если у пользователя старый дефолтный список (без провайдеров или старые эмодзи) - обновляем на нейросетевых мафиози
+      const isOldList = !raw.players || raw.players.every(p => !p.provider && !p.model) ||
+        (raw.players.length === 7 && ['👩‍🦰', '🧔', '👵'].includes(raw.players[0]?.avatar));
+      if (isOldList) {
+        st.players = structuredClone(DEFAULT_PLAYERS);
+      } else {
+        st.players = raw.players.map(p => {
+          p = { provider: '', ...p };
+          if (['Алиса', 'Борис', 'Вера', 'Глеб', 'Дана', 'Егор', 'Жанна'].includes(p.name)) p.name = '';
+          if (/^gemini:/i.test(p.model || '')) { p.provider = 'gemini'; p.model = p.model.replace(/^gemini:/i, ''); }
+          return p;
+        });
+      }
       return st;
     }
   } catch (e) {}
