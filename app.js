@@ -128,21 +128,36 @@ async function llm(p, system, user, maxTokens = 220) {
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
   };
   if (t.gemini) body.reasoning_effort = 'low';   // чтобы «мысли» не съели лимит токенов
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const MAX = 4;
+  for (let attempt = 1; attempt <= MAX; attempt++) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 45000);   // не зависаем навечно
     try {
+      $('subtitle').textContent = `⏳ ${p.name} думает (${t.model})${attempt > 1 ? ', попытка ' + attempt : ''}…`;
       const r = await fetch(url, {
-        method: 'POST',
+        method: 'POST', signal: ctl.signal,
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t.key },
         body: JSON.stringify(body),
       });
-      if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 200));
+      if (!r.ok) {
+        const err = new Error(r.status + ' ' + (await r.text()).slice(0, 200));
+        err.status = r.status; throw err;
+      }
       const j = await r.json();
-      return (j.choices?.[0]?.message?.content || '').trim();
+      const out = (j.choices?.[0]?.message?.content || '').trim();
+      if (!out) chat('event', `⚠ ${p.name} (${t.model}) вернул пустой ответ — использую запасной вариант.`);
+      return out;
     } catch (e) {
+      const msg = e.name === 'AbortError' ? 'таймаут 45 с, нет ответа' : e.message;
       console.warn('LLM error', e);
-      if (attempt === 2) { chat('event', `⚠ Ошибка API (${p.name}, ${playerModel(p)}): ${e.message}`); return null; }
-      await sleep(800);
-    }
+      const retryable = e.name === 'AbortError' || e.status === 429 || e.status >= 500 || e.status === undefined;
+      if (!retryable || attempt === MAX) {
+        chat('event', `⚠ Ошибка API (${p.name}, ${t.model}): ${msg}`); return null;
+      }
+      const wait = e.status === 429 ? attempt * 6000 : 1500;
+      if (e.status === 429) chat('event', `⏳ Лимит запросов (429) у ${t.gemini ? 'Gemini' : 'API'}, жду ${wait / 1000} с…`);
+      await sleep(wait);
+    } finally { clearTimeout(timer); }
   }
   return null;
 }
@@ -217,17 +232,53 @@ function stopSpeaking() {
   if ('speechSynthesis' in window) speechSynthesis.cancel();
 }
 
-async function speak(p, text) {
-  if (S.tts === 'openai' && (S.ttsKey || S.key).trim()) {
-    const ok = await speakOpenAI(p, text);
-    if (ok) return;
+// Подготовка аудио заранее: возвращает blob-URL или null (тогда играем браузерным голосом / тишиной)
+async function ttsPrepare(p, text) {
+  try {
+    if (S.tts === 'openai' && (S.ttsKey || S.key).trim()) return await fetchOpenAI(p, text);
+    if (S.tts === 'gemini' && (S.gKey || '').trim()) return await fetchGemini(p, text);
+  } catch (e) {
+    console.warn('TTS error', e);
+    chat('event', `⚠ Ошибка озвучки (${S.tts}), перехожу на браузерный голос: ${e.message}`);
+    S.tts = 'browser';
   }
-  if (S.tts === 'gemini' && (S.gKey || '').trim()) {
-    const ok = await speakGemini(p, text);
-    if (ok) return;
+  return null;
+}
+
+function playUrl(url) {
+  return new Promise(resolve => {
+    const a = new Audio(url); currentAudio = a;
+    a.playbackRate = S.tts === 'gemini' ? Math.min(2, Math.max(0.5, Number(S.rate) || 1)) : 1;
+    a.onended = a.onerror = () => { URL.revokeObjectURL(url); currentAudio = null; resolve(); };
+    a.play().catch(() => resolve());
+  });
+}
+
+async function speak(p, text, url) {
+  if (url) return playUrl(url);
+  if (S.tts === 'openai' || S.tts === 'gemini' || S.tts === 'browser') {
+    // нет предзагруженного аудио (демо / ошибка) — пробуем подготовить на месте, иначе браузерный голос
+    const u = (S.tts !== 'browser') ? await ttsPrepare(p, text) : null;
+    if (u) return playUrl(u);
+    return speakBrowser(p, text);
   }
-  if (S.tts !== 'off') return speakBrowser(p, text);
   await sleep(Math.min(6000, 700 + text.length * 45));
+}
+
+async function fetchOpenAI(p, text) {
+  const key = (S.ttsKey || S.key).trim();
+  const base = (S.ttsBase || S.base).replace(/\/+$/, '');
+  const r = await fetch(base + '/audio/speech', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+    body: JSON.stringify({
+      model: S.ttsModel || 'gpt-4o-mini-tts', voice: p.voiceO || 'alloy', input: text,
+      speed: Number(S.rate) || 1, response_format: 'mp3',
+      instructions: `Говори как живой человек за игровым столом. Характер: ${p.persona || 'обычный'}.`,
+    }),
+  });
+  if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 160));
+  return URL.createObjectURL(await r.blob());
 }
 
 // Gemini TTS: generateContent -> base64 PCM (24 кГц, 16 бит, моно) -> WAV
@@ -240,70 +291,26 @@ function pcmToWav(pcm, rate = 24000) {
   w(36, 'data'); v.setUint32(40, pcm.length, true);
   return new Blob([h, pcm], { type: 'audio/wav' });
 }
-async function speakGemini(p, text) {
+async function fetchGemini(p, text) {
   const model = (S.gTtsModel || 'gemini-2.5-flash-preview-tts').trim();
-  try {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': S.gKey.trim() },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: `Скажи как живой человек за игровым столом (${p.persona || 'обычный характер'}): ${text}` }] }],
-        generationConfig: {
-          responseModalities: ['AUDIO'],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: p.voiceG || GEMINI_VOICES[p.id % GEMINI_VOICES.length] } } },
-        },
-      }),
-    });
-    if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 160));
-    const j = await r.json();
-    const b64 = j.candidates?.[0]?.content?.parts?.find(x => x.inlineData)?.inlineData?.data;
-    if (!b64) throw new Error('нет аудио в ответе');
-    const bin = atob(b64), pcm = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) pcm[i] = bin.charCodeAt(i);
-    const url = URL.createObjectURL(pcmToWav(pcm));
-    await new Promise(resolve => {
-      const a = new Audio(url); currentAudio = a; a.playbackRate = Math.min(2, Math.max(0.5, Number(S.rate) || 1));
-      a.onended = a.onerror = () => { URL.revokeObjectURL(url); currentAudio = null; resolve(); };
-      a.play().catch(() => resolve());
-    });
-    return true;
-  } catch (e) {
-    console.warn('Gemini TTS error', e);
-    chat('event', '⚠ Ошибка Gemini TTS, перехожу на браузерный голос: ' + e.message);
-    S.tts = 'browser';
-    return false;
-  }
-}
-
-async function speakOpenAI(p, text) {
-  const key = (S.ttsKey || S.key).trim();
-  const base = (S.ttsBase || S.base).replace(/\/+$/, '');
-  if (!key) return false;
-  try {
-    const r = await fetch(base + '/audio/speech', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
-      body: JSON.stringify({
-        model: S.ttsModel || 'gpt-4o-mini-tts', voice: p.voiceO || 'alloy', input: text,
-        speed: Number(S.rate) || 1, response_format: 'mp3',
-        instructions: `Говори как живой человек за игровым столом. Характер: ${p.persona || 'обычный'}.`,
-      }),
-    });
-    if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 160));
-    const blob = await r.blob();
-    const url = URL.createObjectURL(blob);
-    await new Promise((resolve) => {
-      const a = new Audio(url); currentAudio = a;
-      a.onended = a.onerror = () => { URL.revokeObjectURL(url); currentAudio = null; resolve(); };
-      a.play().catch(() => resolve());
-    });
-    return true;
-  } catch (e) {
-    console.warn('TTS error', e);
-    chat('event', '⚠ Ошибка OpenAI TTS, перехожу на браузерный голос: ' + e.message);
-    S.tts = 'browser';
-    return false;
-  }
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': S.gKey.trim() },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: `Скажи как живой человек за игровым столом (${p.persona || 'обычный характер'}): ${text}` }] }],
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: p.voiceG || GEMINI_VOICES[p.id % GEMINI_VOICES.length] } } },
+      },
+    }),
+  });
+  if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 160));
+  const j = await r.json();
+  const b64 = j.candidates?.[0]?.content?.parts?.find(x => x.inlineData)?.inlineData?.data;
+  if (!b64) throw new Error('нет аудио в ответе');
+  const bin = atob(b64), pcm = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) pcm[i] = bin.charCodeAt(i);
+  return URL.createObjectURL(pcmToWav(pcm));
 }
 
 function browserVoices() { return ('speechSynthesis' in window) ? speechSynthesis.getVoices() : []; }
@@ -323,14 +330,22 @@ function speakBrowser(p, text) {
   });
 }
 
-async function say(p, text) {
+// Показывает реплику и сразу играет уже загруженное аудио (текст и голос появляются вместе)
+async function say(p, text, url) {
   chat('', text, p.name, p.color);
-  G.log.push(`${p.name}: ${text}`);
   $('subtitle').textContent = `${p.name}: ${text}`;
   p.bubble.textContent = text;
   p.el.classList.add('speaking');
-  await speak(p, text);
+  await speak(p, text, url);
   p.el.classList.remove('speaking');
+}
+
+// Готовит реплику: текст от модели -> сразу в лог (чтобы следующий игрок её видел),
+// аудио грузится дальше в фоне. Возвращает {text, audio: Promise<url|null>}
+async function prepTurn(p, round) {
+  const text = await speechTurn(p, round);
+  G.log.push(`${p.name}: ${text}`);
+  return { p, text, audio: ttsPrepare(p, text) };
 }
 
 /* ================= Ход игры ================= */
@@ -416,17 +431,21 @@ async function nightPhase() {
 
 async function dayPhase() {
   setCenter('Обсуждение');
-  for (let r = 1; r <= S.rounds; r++) {
-    announce(`Круг обсуждения ${r}.`);
-    const order = alive();
-    for (const p of order) {
-      if (!p.alive) continue;
-      await gate();
-      const t = await speechTurn(p, r);
-      await gate();
-      await say(p, t);
-      $('subtitle').textContent = '';
-    }
+  // Конвейер: пока текущий игрок говорит, следующий уже думает и озвучивается
+  const order = alive(), turns = [];
+  for (let r = 1; r <= S.rounds; r++) order.forEach(p => turns.push({ p, r }));
+  let pending = prepTurn(turns[0].p, turns[0].r);
+  for (let i = 0; i < turns.length; i++) {
+    const { p, r } = turns[i];
+    if (i === 0 || turns[i - 1].r !== r) announce(`Круг обсуждения ${r}.`);
+    await gate();
+    const cur = await pending;                       // текст готов
+    pending = i + 1 < turns.length ? prepTurn(turns[i + 1].p, turns[i + 1].r) : null;
+    pending && pending.catch(() => {});              // ошибки разберём, когда дойдёт очередь
+    const url = await cur.audio;                     // аудио готово — теперь показываем текст и играем
+    await gate();
+    await say(p, cur.text, url);
+    $('subtitle').textContent = '';
   }
   // голосование
   setPhase(`Голосование (день ${G.night})`); setCenter('Голосование');
