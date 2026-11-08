@@ -53,6 +53,27 @@ function brandOf(provider, model) {
   return PROVIDER_BRAND[provider] || null;
 }
 
+// Имя игрока = название его нейросети, голос подобран под «характер» бренда.
+// o — голос OpenAI TTS, g — голос Gemini TTS, e — голос ElevenLabs (имя из стандартных)
+const BRAND_INFO = {
+  openai:     { name: 'ChatGPT',    o: 'alloy',   g: 'Kore',       e: 'Rachel' },   // ровный, универсальный
+  claude:     { name: 'Claude',     o: 'sage',    g: 'Charon',     e: 'Adam' },     // спокойный, вдумчивый
+  gemini:     { name: 'Gemini',     o: 'nova',    g: 'Puck',       e: 'Bella' },    // живой, бодрый
+  deepseek:   { name: 'DeepSeek',   o: 'onyx',    g: 'Fenrir',     e: 'Antoni' },   // низкий, основательный
+  grok:       { name: 'Grok',       o: 'ash',     g: 'Orus',       e: 'Josh' },     // дерзкий, с хрипотцой
+  meta:       { name: 'Llama',      o: 'echo',    g: 'Iapetus',    e: 'Sam' },      // дружелюбный, простой
+  mistral:    { name: 'Mistral',    o: 'coral',   g: 'Aoede',      e: 'Domi' },     // лёгкий, элегантный
+  qwen:       { name: 'Qwen',       o: 'shimmer', g: 'Zephyr',     e: 'Elli' },     // мягкий, чёткий
+  kimi:       { name: 'Kimi',       o: 'fable',   g: 'Umbriel',    e: 'Arnold' },
+  glm:        { name: 'GLM',        o: 'verse',   g: 'Algieba',    e: 'Rachel' },
+  perplexity: { name: 'Perplexity', o: 'ballad',  g: 'Callirrhoe', e: 'Bella' },
+  cohere:     { name: 'Cohere',     o: 'coral',   g: 'Despina',    e: 'Domi' },
+  microsoft:  { name: 'Phi',        o: 'alloy',   g: 'Achird',     e: 'Josh' },
+  nvidia:     { name: 'Nemotron',   o: 'onyx',    g: 'Alnilam',    e: 'Arnold' },
+  amazon:     { name: 'Nova',       o: 'nova',    g: 'Sulafat',    e: 'Elli' },
+  minimax:    { name: 'MiniMax',    o: 'echo',    g: 'Gacrux',     e: 'Antoni' },
+};
+
 // Рисует аватарку-мафиози с эмблемой бренда. v: 0..3 — вариант оформления рамки и пера
 function svgAvatar(brand, v = 0) {
   const { color: c, glyph } = EXTRA[brand];
