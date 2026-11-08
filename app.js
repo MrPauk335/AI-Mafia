@@ -164,6 +164,7 @@ function announce(text, cls = 'sys') {
 }
 
 /* ================= LLM ================= */
+const NO_REASONING = new Set();   // модели, которые ответили 400 на reasoning_effort — дальше шлём без него
 function modelOf(p) { return (p.model || '').trim() || PROVIDERS[p.provider]?.def || ''; }
 function modelLabel(p) { return modelOf(p) || '?'; }
 function baseOf(prov) { return prov === 'custom' ? (S.customBase || '').trim().replace(/\/+$/, '') : PROVIDERS[prov].base; }
@@ -194,7 +195,9 @@ function buildRequest(p, system, user, maxTokens) {
     body.max_tokens = maxTokens;
     // Экономия: скрытое «рассуждение» платное и медленное. Flash/Flash-Lite — отключаем совсем, Pro отключить нельзя — ставим минимум
     if (p.provider === 'gemini') {
-      if (/pro/i.test(model)) { body.max_tokens += 1024; body.reasoning_effort = 'low'; } else body.reasoning_effort = 'none';
+      if (/pro/i.test(model)) { body.max_tokens += 1024; body.reasoning_effort = 'low'; }
+      else if (/^gemini-2\.5-flash$/i.test(model)) body.reasoning_effort = 'none';   // только где точно поддерживается
+      // Flash-Lite и алиасы вроде *-latest: параметр не шлём (иначе 400 INVALID_ARGUMENT), у Lite рассуждение и так выключено
     }
     if (p.provider === 'grok' && /mini/i.test(model)) { body.max_tokens += 1024; body.reasoning_effort = 'low'; }
     // Deploy: обе модели «думающие» (по умолчанию reasoning_effort=high, мысли тарифицируются как выходные токены).
@@ -205,6 +208,7 @@ function buildRequest(p, system, user, maxTokens) {
     }
     if (/reasoner/i.test(model)) body.max_tokens += 2000;
   }
+  if (NO_REASONING.has(p.provider + ':' + modelOf(p))) delete body.reasoning_effort;
   return {
     url: base + '/chat/completions',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
@@ -234,6 +238,11 @@ async function llm(p, system, user, maxTokens = 220) {
       if (!out) chat('event', `⚠ ${p.name} (${label}) вернул пустой ответ — использую запасной вариант.`);
       return out;
     } catch (e) {
+      // 400 из-за reasoning_effort (модель его не знает) — один раз повторяем без параметра
+      if (e.status === 400 && rq.body.reasoning_effort !== undefined) {
+        console.warn('Retry without reasoning_effort for', modelOf(p));
+        delete rq.body.reasoning_effort; NO_REASONING.add(p.provider + ':' + modelOf(p)); attempt--; continue;
+      }
       const isNet = e.name === 'TypeError';               // сеть / CORS
       const msg = e.name === 'AbortError' ? 'таймаут 60 с, нет ответа'
         : isNet ? 'сеть недоступна или провайдер блокирует запросы из браузера (CORS) — попробуй OpenRouter' : e.message;
